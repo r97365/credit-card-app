@@ -511,104 +511,184 @@ function App() {
   }
 
   async function saveCard(payload) {
-    const base = {
-      user_id: session.user.id,
-      name: payload.name.trim(),
-      bank: payload.bank.trim() || null,
-      last4: payload.last4.trim() || null,
-      monthly_spend_limit: payload.monthlySpendLimit ? Number(payload.monthlySpendLimit) : null,
-      tip: payload.tip.trim() || null,
-      color_a: payload.colors[0],
-      color_b: payload.colors[1],
-      reward_date_basis: payload.rewardDateBasis,
+    const existing = payload.id ? cards.find(card => card.id === payload.id) : null
+    const id = payload.id || crypto.randomUUID()
+    const updatedAt = new Date().toISOString()
+    const sortOrder = existing?.sortOrder ?? activeCards.length
+
+    const nextCard = {
+      id,
+      name:payload.name.trim(),
+      bank:payload.bank.trim() || '',
+      last4:payload.last4.trim() || '',
+      monthlySpendLimit:payload.monthlySpendLimit ? Number(payload.monthlySpendLimit) : 0,
+      tip:payload.tip.trim() || '',
+      colors:payload.colors,
+      rewardDateBasis:payload.rewardDateBasis,
+      rewardPrograms:existing?.rewardPrograms || [],
+      sortOrder,
+      archived:sortOrder < 0,
+      updatedAt,
     }
 
-    if (payload.id) {
-      const { error: updateError } = await supabase.from('cards').update(base).eq('id', payload.id)
-      if (updateError) throw updateError
+    if (existing) {
+      setCards(prev => prev.map(card => card.id === id ? nextCard : card))
     } else {
-      const { data, error: insertError } = await supabase.from('cards').insert(base).select().single()
-      if (insertError) throw insertError
-      setSelectedCardId(data.id)
-      await loadData(data.id)
-      return
+      setCards(prev => [...prev.filter(card => card.archived === false), nextCard, ...prev.filter(card => card.archived)])
+      setSelectedCardId(id)
     }
-    await loadData()
+
+    await queueLocalMutation({
+      entity:'card',
+      recordId:id,
+      op:existing ? 'update' : 'create',
+      baseUpdatedAt:existing?.updatedAt || null,
+      payload:toCardRow(nextCard, session.user.id),
+    })
   }
 
   async function saveProgram(cardId, p) {
-    const row = {
-      user_id: session.user.id,
-      card_id: cardId,
-      name: p.name.trim(),
-      rate: Number(p.rate || 0),
-      reward_cap: p.capType === 'reward' && p.capValue !== '' ? Number(p.capValue) : null,
-      spend_cap: p.capType === 'spend' && p.capValue !== '' ? Number(p.capValue) : null,
-      calc_mode: p.calcMode,
-      rounding: p.rounding,
-      start_date: p.startDate || null,
-      end_date: p.endDate || null,
+    const card = cards.find(c => c.id === cardId)
+    if (!card) return
+
+    const existing = p.id ? card.rewardPrograms.find(program => program.id === p.id) : null
+    const id = p.id || crypto.randomUUID()
+    const updatedAt = new Date().toISOString()
+    const nextProgram = {
+      id,
+      name:p.name.trim(),
+      rate:Number(p.rate || 0),
+      rewardCap:p.capType === 'reward' && p.capValue !== '' ? Number(p.capValue) : null,
+      spendCap:p.capType === 'spend' && p.capValue !== '' ? Number(p.capValue) : null,
+      calcMode:p.calcMode,
+      rounding:p.rounding,
+      startDate:p.startDate || null,
+      endDate:p.endDate || null,
+      updatedAt,
     }
-    const query = p.id
-      ? supabase.from('reward_programs').update(row).eq('id', p.id)
-      : supabase.from('reward_programs').insert(row)
-    const { error: saveError } = await query
-    if (saveError) throw saveError
-    await loadData()
+
+    setCards(prev => prev.map(item => item.id !== cardId ? item : {
+      ...item,
+      rewardPrograms:existing
+        ? item.rewardPrograms.map(program => program.id === id ? nextProgram : program)
+        : [...item.rewardPrograms, nextProgram],
+    }))
+
+    await queueLocalMutation({
+      entity:'program',
+      recordId:id,
+      op:existing ? 'update' : 'create',
+      baseUpdatedAt:existing?.updatedAt || null,
+      payload:toProgramRow(nextProgram, cardId, session.user.id),
+    })
   }
 
   async function deleteProgram(id) {
-    const { error: deleteError } = await supabase.from('reward_programs').delete().eq('id', id)
-    if (deleteError) throw deleteError
-    await loadData()
+    const card = cards.find(c => c.rewardPrograms.some(program => program.id === id))
+    const program = card?.rewardPrograms.find(p => p.id === id)
+    if (!card || !program) return
+
+    setCards(prev => prev.map(item => item.id !== card.id ? item : {
+      ...item,
+      rewardPrograms:item.rewardPrograms.filter(p => p.id !== id),
+    }))
+
+    await queueLocalMutation({
+      entity:'program',
+      recordId:id,
+      op:'delete',
+      baseUpdatedAt:program.updatedAt || null,
+      payload:null,
+    })
   }
 
   async function reorderCards(orderedIds) {
     const active = orderedIds.map(id => cards.find(c => c.id === id)).filter(Boolean)
-    setCards(prev => {
-      const archived = prev.filter(c => c.archived)
-      return [...active.map((card,index) => ({ ...card, sortOrder:index })), ...archived]
-    })
-    await Promise.all(active.map((card,index) => supabase.from('cards').update({ sort_order:index }).eq('id', card.id)))
+    const updatedAt = new Date().toISOString()
+    const nextActive = active.map((card,index) => ({ ...card, sortOrder:index, updatedAt }))
+    const archived = cards.filter(c => c.archived)
+    setCards([...nextActive, ...archived])
+
+    for (const card of nextActive) {
+      await queueMutation(session.user.id, {
+        entity:'card',
+        recordId:card.id,
+        op:'update',
+        baseUpdatedAt:active.find(x => x.id === card.id)?.updatedAt || null,
+        payload:toCardRow(card, session.user.id),
+      })
+    }
+    await refreshSyncStatus()
+    if (navigator.onLine) flushMutationQueue(session.user.id).then(refreshSyncStatus).catch(() => {})
   }
 
   async function archiveCard(cardId) {
     const card = cards.find(c => c.id === cardId)
     if (!card) return
-    const { error: updateError } = await supabase.from('cards').update({ sort_order:-1 }).eq('id', cardId)
-    if (updateError) throw updateError
-    await loadData()
+    const updated = { ...card, sortOrder:-1, archived:true, updatedAt:new Date().toISOString() }
+    setCards(prev => prev.map(item => item.id === cardId ? updated : item))
+    setSelectedCardId(prev => prev === cardId ? activeCards.find(c => c.id !== cardId)?.id || null : prev)
+
+    await queueLocalMutation({
+      entity:'card',
+      recordId:cardId,
+      op:'update',
+      baseUpdatedAt:card.updatedAt || null,
+      payload:toCardRow(updated, session.user.id),
+    })
   }
 
   async function restoreCard(cardId) {
-    const nextOrder = activeCards.length
-    const { error: updateError } = await supabase.from('cards').update({ sort_order:nextOrder }).eq('id', cardId)
-    if (updateError) throw updateError
-    await loadData()
+    const card = cards.find(c => c.id === cardId)
+    if (!card) return
+    const updated = { ...card, sortOrder:activeCards.length, archived:false, updatedAt:new Date().toISOString() }
+    setCards(prev => prev.map(item => item.id === cardId ? updated : item))
+
+    await queueLocalMutation({
+      entity:'card',
+      recordId:cardId,
+      op:'update',
+      baseUpdatedAt:card.updatedAt || null,
+      payload:toCardRow(updated, session.user.id),
+    })
   }
 
   async function duplicateProgramsToNextPeriod(cardId) {
     const card = cards.find(c => c.id === cardId)
     if (!card?.rewardPrograms?.length) return 0
-    const rows = card.rewardPrograms.map(p => {
+
+    const copies = card.rewardPrograms.map(p => {
       const shifted = shiftPeriod(p.startDate, p.endDate)
       return {
-        user_id: session.user.id,
-        card_id: cardId,
-        name: p.name,
-        rate: p.rate,
-        reward_cap: p.rewardCap,
-        spend_cap: p.spendCap,
-        calc_mode: p.calcMode,
-        rounding: p.rounding,
-        start_date: shifted.startDate,
-        end_date: shifted.endDate,
+        id:crypto.randomUUID(),
+        name:p.name,
+        rate:p.rate,
+        rewardCap:p.rewardCap,
+        spendCap:p.spendCap,
+        calcMode:p.calcMode,
+        rounding:p.rounding,
+        startDate:shifted.startDate,
+        endDate:shifted.endDate,
+        updatedAt:new Date().toISOString(),
       }
     })
-    const { error: insertError } = await supabase.from('reward_programs').insert(rows)
-    if (insertError) throw insertError
-    await loadData()
-    return rows.length
+
+    setCards(prev => prev.map(item => item.id !== cardId ? item : {
+      ...item,
+      rewardPrograms:[...item.rewardPrograms, ...copies],
+    }))
+
+    for (const program of copies) {
+      await queueMutation(session.user.id, {
+        entity:'program',
+        recordId:program.id,
+        op:'create',
+        payload:toProgramRow(program, cardId, session.user.id),
+      })
+    }
+    await refreshSyncStatus()
+    if (navigator.onLine) flushMutationQueue(session.user.id).then(refreshSyncStatus).catch(() => {})
+    return copies.length
   }
 
   async function signOut() {
