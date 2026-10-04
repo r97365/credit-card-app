@@ -406,3 +406,20 @@ h2,h3{margin:0}
 .wallet-reorder-hint{
   bottom:-4px;
 }
+
+/* v0.2.8: custom range dates and true wallet order */
+.range-date-grid{
+  display:grid !important;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
+  gap:10px !important;
+}
+.range-date-grid label{
+  min-width:0 !important;
+  width:100% !important;
+}
+.range-date-grid .custom-date-field{
+  width:100% !important;
+}
+.wallet-card.selected{
+  outline:1px solid rgba(255,255,255,.08);
+}
