@@ -4,7 +4,7 @@ import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 
-const APP_VERSION = '0.3.1'
+const APP_VERSION = '0.3.2'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const PALETTES = [
@@ -29,6 +29,8 @@ function App() {
   const [showTip, setShowTip] = useState(false)
   const [showAddTx, setShowAddTx] = useState(false)
   const [showCardEditor, setShowCardEditor] = useState(false)
+  const [showCardList, setShowCardList] = useState(false)
+  const [editingCardId, setEditingCardId] = useState(null)
   const [creatingCard, setCreatingCard] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showStats, setShowStats] = useState(false)
@@ -193,7 +195,7 @@ function App() {
       .sort((a,b) => a.endDate.localeCompare(b.endDate))
   }, [activeCards])
 
-  const modalOpen = showRangePicker || showAddTx || showCardEditor || showSettings || showStats || Boolean(editingTransaction)
+  const modalOpen = showRangePicker || showAddTx || showCardEditor || showCardList || showSettings || showStats || Boolean(editingTransaction)
 
   useEffect(() => {
     if (!modalOpen) return
@@ -486,11 +488,11 @@ function App() {
 
       {expiringPrograms.length > 0 && <div className="expiry-banner">
         <div><strong>活動即將到期</strong><span>{expiringPrograms.slice(0,2).map(p => `${p.cardName}・${p.name} ${formatDateShort(p.endDate)}`).join('　')}</span></div>
-        <button onClick={() => { if (selectedCard) { setCreatingCard(false); setShowCardEditor(true) } }}>更新</button>
+        <button onClick={() => { if (selectedCard) { setEditingCardId(selectedCard.id); setCreatingCard(false); setShowCardEditor(true) } }}>更新</button>
       </div>}
 
       {loadingData ? <CenteredState compact title="同步資料中…" /> : !selectedCard ? (
-        <EmptyCards onAdd={() => { setCreatingCard(true); setShowCardEditor(true) }} />
+        <EmptyCards onAdd={() => { setEditingCardId(null); setCreatingCard(true); setShowCardEditor(true) }} />
       ) : (
         <>
           <CardStack cards={activeCards} selectedId={selectedCardId} onSelect={(id) => { setSelectedCardId(id); setShowTip(false) }} onReorder={reorderCards} />
@@ -596,9 +598,42 @@ function App() {
         }}
       />}
       {editingTransaction && <TransactionEditor tx={editingTransaction} cards={activeCards} onClose={() => setEditingTransaction(null)} onSave={saveTransactionEdits} />}
-      {showCardEditor && <CardEditor card={creatingCard ? null : selectedCard} onClose={() => { setShowCardEditor(false); setCreatingCard(false) }} onSaveCard={saveCard} onSaveProgram={saveProgram} onDeleteProgram={deleteProgram} onArchiveCard={archiveCard} onDuplicatePrograms={duplicateProgramsToNextPeriod} />}
+      {showCardEditor && <CardEditor
+        card={creatingCard ? null : (activeCards.find(c => c.id === editingCardId) || selectedCard)}
+        onClose={() => { setShowCardEditor(false); setCreatingCard(false); setEditingCardId(null) }}
+        onSaveCard={saveCard}
+        onSaveProgram={saveProgram}
+        onDeleteProgram={deleteProgram}
+        onArchiveCard={archiveCard}
+        onDuplicatePrograms={duplicateProgramsToNextPeriod}
+      />}
+      {showCardList && <CardListSheet
+        cards={activeCards}
+        onClose={() => setShowCardList(false)}
+        onChoose={(id) => {
+          setShowCardList(false)
+          setEditingCardId(id)
+          setCreatingCard(false)
+          setShowCardEditor(true)
+        }}
+        onAdd={() => {
+          setShowCardList(false)
+          setEditingCardId(null)
+          setCreatingCard(true)
+          setShowCardEditor(true)
+        }}
+      />}
       {showStats && <StatsSheet cards={activeCards} transactions={transactions} month={month} onClose={() => setShowStats(false)} />}
-      {showSettings && <AccountSheet version={APP_VERSION} email={session.user.email} cards={cards} selectedCard={selectedCard} onClose={() => setShowSettings(false)} onAddCard={() => { setShowSettings(false); setCreatingCard(true); setShowCardEditor(true) }} onEditCard={() => { setShowSettings(false); if(selectedCard) { setCreatingCard(false); setShowCardEditor(true) } }} onRestoreCard={restoreCard} onSignOut={signOut} />}
+      {showSettings && <AccountSheet
+        version={APP_VERSION}
+        email={session.user.email}
+        cards={cards}
+        onClose={() => setShowSettings(false)}
+        onOpenCards={() => { setShowSettings(false); setShowCardList(true) }}
+        onAddCard={() => { setShowSettings(false); setEditingCardId(null); setCreatingCard(true); setShowCardEditor(true) }}
+        onRestoreCard={restoreCard}
+        onSignOut={signOut}
+      />}
       {undoDelete && <div className="undo-toast"><span>已刪除「{undoDelete.tx.title}」</span><button onClick={undoTransactionDelete}>復原</button></div>}
     </div>
   )
@@ -1103,9 +1138,9 @@ function RangePicker({ startDate, endDate, onClose, onApply }) {
       {mode === 'date' ? <div className="two-col range-date-grid">
         <label>開始日期<DateField value={start} onChange={setStart} /></label>
         <label>結束日期<DateField value={end} onChange={setEnd} /></label>
-      </div> : <div className="two-col">
-        <label>起始月份<input type="month" value={startMonth} onChange={e => setStartMonth(e.target.value)} /></label>
-        <label>結束月份<input type="month" value={endMonth} onChange={e => setEndMonth(e.target.value)} /></label>
+      </div> : <div className="two-col range-month-grid">
+        <label>起始月份<MonthField value={startMonth} onChange={setStartMonth} /></label>
+        <label>結束月份<MonthField value={endMonth} onChange={setEndMonth} /></label>
       </div>}
       <div className="range-explain">區間跨越多個月份時，每個月份會各自套用該月的回饋活動與上限，再將結果加總。</div>
       <button className="primary-btn" onClick={apply}>套用區間</button>
@@ -1119,6 +1154,19 @@ function DateField({ value, onChange, placeholder = '選擇日期' }) {
     <span className="date-chevron">⌄</span>
     <input
       type="date"
+      value={value || ''}
+      onChange={e => onChange(e.target.value)}
+      aria-label={placeholder}
+    />
+  </div>
+}
+
+function MonthField({ value, onChange, placeholder = '選擇月份' }) {
+  return <div className={`custom-date-field custom-month-field ${value ? '' : 'empty'}`}>
+    <span>{value ? formatMonthLong(value) : placeholder}</span>
+    <span className="date-chevron">⌄</span>
+    <input
+      type="month"
       value={value || ''}
       onChange={e => onChange(e.target.value)}
       aria-label={placeholder}
@@ -1260,18 +1308,18 @@ function ProgramEditor({ value, onCancel, onSave }) {
     <label>上限類型<select value={capType} onChange={e=>setCapType(e.target.value)}><option value="none">無上限</option><option value="reward">回饋金上限</option><option value="spend">消費金額上限</option></select></label>
     {capType !== 'none' && <label>{capType === 'reward' ? '回饋金上限' : '消費金額上限'}<input inputMode="decimal" value={capValue} onChange={e=>setCapValue(e.target.value)} /></label>}
     <div className="two-col"><label>計算方式<select value={calcMode} onChange={e=>setCalcMode(e.target.value)}><option value="monthly_total">整月加總後計算</option><option value="per_transaction">單項計算再加總</option></select></label><label>小數處理<select value={rounding} onChange={e=>setRounding(e.target.value)}><option value="floor">無條件捨去</option><option value="round">四捨五入</option></select></label></div>
-    <div className="two-col"><label>開始日期<input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} /></label><label>結束日期<input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)} /></label></div>
+    <div className="two-col range-date-grid"><label>開始日期<DateField value={startDate} onChange={setStartDate} placeholder="未設定" /></label><label>結束日期<DateField value={endDate} onChange={setEndDate} placeholder="未設定" /></label></div>
     <button className="primary-btn" disabled={!name.trim() || Number(rate)<0} onClick={() => onSave({ ...value,name,rate,capType,capValue,calcMode,rounding,startDate,endDate })}>儲存回饋活動</button>
   </div>
 }
 
-function AccountSheet({ version, email, cards, selectedCard, onClose, onAddCard, onEditCard, onRestoreCard, onSignOut }) {
+function AccountSheet({ version, email, cards, onClose, onOpenCards, onAddCard, onRestoreCard, onSignOut }) {
   const archived = cards.filter(c => c.archived)
 
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
     <SheetGrabber onClose={onClose} /><div className="sheet-title-row"><h3>帳號與卡片</h3><button className="close-btn" onClick={onClose}>×</button></div>
     <div className="account-email">{email}</div>
-    {selectedCard && <button className="settings-action" onClick={onEditCard}>⚙ 目前卡片設定</button>}
+    <button className="settings-action" onClick={onOpenCards}>▰ 卡片設定</button>
     <button className="settings-action" onClick={onAddCard}>＋ 新增信用卡</button>
     {archived.length > 0 && <>
       <div className="field-label">已封存</div>
@@ -1279,6 +1327,25 @@ function AccountSheet({ version, email, cards, selectedCard, onClose, onAddCard,
     </>}
     <div className="app-version">Card Rewards v{version}</div>
     <button className="settings-action danger-text" onClick={onSignOut}>登出</button>
+  </div></div>
+}
+
+function CardListSheet({ cards, onClose, onChoose, onAdd }) {
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
+    <SheetGrabber onClose={onClose} />
+    <div className="sheet-title-row"><h3>卡片設定</h3><button className="close-btn" onClick={onClose}>×</button></div>
+    <div className="card-settings-list">
+      {cards.map(card => <button className="card-settings-item" key={card.id} onClick={() => onChoose(card.id)}>
+        <div className="card-settings-swatch" style={{background:`linear-gradient(135deg,${card.colors[0]},${card.colors[1]})`}} />
+        <div className="card-settings-copy">
+          <strong>{card.name}</strong>
+          <span>{card.bank || '未設定銀行'}{card.last4 ? ` · •••• ${card.last4}` : ''}</span>
+        </div>
+        <span className="card-settings-chevron">›</span>
+      </button>)}
+      {!cards.length && <div className="empty-list">尚未新增信用卡</div>}
+    </div>
+    <button className="primary-btn" onClick={onAdd}>＋ 新增信用卡</button>
   </div></div>
 }
 
@@ -1334,6 +1401,10 @@ function formatDateShort(date){
 function formatDateLong(date){
   const [y,m,d] = date.split('-')
   return `${Number(y)}年${Number(m)}月${Number(d)}日`
+}
+function formatMonthLong(month){
+  const [y,m] = month.split('-')
+  return `${Number(y)}年${Number(m)}月`
 }
 function addDays(dateStr, days){
   const d = new Date(dateStr + 'T12:00:00')
