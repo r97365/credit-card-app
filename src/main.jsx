@@ -312,6 +312,13 @@ function App() {
     await loadData()
   }
 
+  async function restoreCard(cardId) {
+    const nextOrder = activeCards.length
+    const { error: updateError } = await supabase.from('cards').update({ sort_order:nextOrder }).eq('id', cardId)
+    if (updateError) throw updateError
+    await loadData()
+  }
+
   async function duplicateProgramsToNextPeriod(cardId) {
     const card = cards.find(c => c.id === cardId)
     if (!card?.rewardPrograms?.length) return 0
@@ -480,7 +487,7 @@ function App() {
       {editingTransaction && <TransactionEditor tx={editingTransaction} cards={activeCards} onClose={() => setEditingTransaction(null)} onSave={saveTransactionEdits} />}
       {showCardEditor && <CardEditor card={selectedCard} onClose={() => setShowCardEditor(false)} onSaveCard={saveCard} onSaveProgram={saveProgram} onDeleteProgram={deleteProgram} onArchiveCard={archiveCard} onDuplicatePrograms={duplicateProgramsToNextPeriod} />}
       {showStats && <StatsSheet cards={activeCards} transactions={transactions} month={month} onClose={() => setShowStats(false)} />}
-      {showSettings && <AccountSheet email={session.user.email} cards={activeCards} selectedCard={selectedCard} onClose={() => setShowSettings(false)} onAddCard={() => { setShowSettings(false); setSelectedCardId(null); setShowCardEditor(true) }} onEditCard={() => { setShowSettings(false); if(selectedCard) setShowCardEditor(true) }} onReorder={reorderCards} onSelectCard={setSelectedCardId} onSignOut={signOut} />}
+      {showSettings && <AccountSheet email={session.user.email} cards={cards} selectedCard={selectedCard} onClose={() => setShowSettings(false)} onAddCard={() => { setShowSettings(false); setSelectedCardId(null); setShowCardEditor(true) }} onEditCard={() => { setShowSettings(false); if(selectedCard) setShowCardEditor(true) }} onReorder={reorderCards} onSelectCard={setSelectedCardId} onRestoreCard={restoreCard} onSignOut={signOut} />}
       {undoDelete && <div className="undo-toast"><span>已刪除「{undoDelete.tx.title}」</span><button onClick={undoTransactionDelete}>復原</button></div>}
     </div>
   )
@@ -547,6 +554,17 @@ function AuthScreen({ configError }) {
     </form>
     <button className="auth-switch" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setConfirmPassword(''); setShowPassword(false); setShowConfirmPassword(false); setMessage('') }}>{mode === 'login' ? '第一次使用？建立帳號' : '已經有帳號？登入'}</button>
   </div>
+}
+
+function SheetGrabber({ onClose }) {
+  const [startY,setStartY] = useState(null)
+  const [dragY,setDragY] = useState(0)
+  return <div
+    className="sheet-grabber-zone"
+    onTouchStart={e=>{setStartY(e.touches[0].clientY);setDragY(0)}}
+    onTouchMove={e=>{if(startY!=null)setDragY(Math.max(0,e.touches[0].clientY-startY))}}
+    onTouchEnd={()=>{if(dragY>65)onClose();setStartY(null);setDragY(0)}}
+  ><div className="sheet-grabber" style={{transform:`translateY(${Math.min(dragY,18)}px)`}} /></div>
 }
 
 function EyeIcon({ open }) {
@@ -671,6 +689,23 @@ function AddTransactionModal({ card, transactions, onClose, onSave }) {
     })
   }, [projected, baseSummary, amount])
 
+  const rewardBreakdown = useMemo(() => {
+    if (!projected || !Number(amount)) return []
+    return projected.programs.map(after => {
+      const before = baseSummary.programs.find(p => p.id === after.id)
+      const beforeReward = Number(before?.reward || 0)
+      const gained = Math.max(0, Number(after.reward || 0) - beforeReward)
+      return {
+        id: after.id,
+        name: after.name,
+        rate: after.rate,
+        gained,
+        effective: Number(amount) ? gained / Number(amount) * 100 : 0,
+        capped: after.capped,
+      }
+    })
+  }, [projected, baseSummary, amount])
+
   async function save() {
     setBusy(true)
     try { await onSave({ cardId:card.id, date, title, amount:Number(amount) }) }
@@ -680,13 +715,14 @@ function AddTransactionModal({ card, transactions, onClose, onSave }) {
 
   return <div className="modal-backdrop" onMouseDown={onClose}>
     <div className="sheet" onMouseDown={e => e.stopPropagation()}>
-      <div className="sheet-grabber" />
+      <SheetGrabber onClose={onClose} />
       <h3>新增刷卡</h3>
       <div className="selected-mini-card">{card.name}<span>{card.bank}</span></div>
       <label>日期<input type="date" value={date} onChange={e => setDate(e.target.value)} /></label>
       <label>刷卡項目<input autoFocus placeholder="手動輸入，例如：加油" value={title} onChange={e => setTitle(e.target.value)} /></label>
       <label>金額<input inputMode="decimal" placeholder="$ 0" value={amount} onChange={e => setAmount(e.target.value)} /></label>
       {projected && <div className="reward-preview"><span>新增後本月預估總回饋</span><strong>{formatMoney(projected.totalReward)} · {formatPct(projected.effectiveRate)}</strong></div>}
+      {rewardBreakdown.length > 0 && <div className="reward-breakdown">{rewardBreakdown.map(p => <div key={p.id}><span>{p.name} · {p.rate}%{p.capped ? ' · 已達上限' : ''}</span><strong>本筆 +{formatMoney(p.gained)} <small>({formatPct(p.effective)})</small></strong></div>)}</div>}
       {capWarnings.map(w => <div className="cap-warning" key={w.name}><strong>{w.name}｜{w.rate}% 將達上限</strong><div>本筆約前 {formatMoney(w.eligible)} 仍可取得此活動回饋，剩餘 {formatMoney(w.excess)} 超過該活動上限；其他活動仍會各自計算。</div></div>)}
       <button className="primary-btn" disabled={busy || !title.trim() || !Number(amount)} onClick={save}>{busy ? '儲存中…' : '新增'}</button>
     </div>
@@ -717,7 +753,7 @@ function RangePicker({ startDate, endDate, onClose, onApply }) {
 
   return <div className="modal-backdrop" onMouseDown={onClose}>
     <div className="sheet" onMouseDown={e => e.stopPropagation()}>
-      <div className="sheet-grabber" />
+      <SheetGrabber onClose={onClose} />
       <div className="sheet-title-row"><h3>自訂區間</h3><button className="close-btn" onClick={onClose}>×</button></div>
       <div className="segment-control">
         <button className={mode === 'date' ? 'selected' : ''} onClick={() => setMode('date')}>自訂日期</button>
@@ -762,7 +798,7 @@ function TransactionEditor({ tx, cards, onClose, onSave }) {
   }
 
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
-    <div className="sheet-grabber" /><div className="sheet-title-row"><h3>編輯刷卡紀錄</h3><button className="close-btn" onClick={onClose}>×</button></div>
+    <SheetGrabber onClose={onClose} /><div className="sheet-title-row"><h3>編輯刷卡紀錄</h3><button className="close-btn" onClick={onClose}>×</button></div>
     <label>信用卡<select value={cardId} onChange={e=>{setCardId(e.target.value);setProgramExclusions([])}}>{cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
     <div className="two-col"><label>交易日<input type="date" value={date} onChange={e=>setDate(e.target.value)} /></label><label>入帳日（選填）<input type="date" value={postedDate} onChange={e=>setPostedDate(e.target.value)} /></label></div>
     <label>刷卡項目<input value={title} onChange={e=>setTitle(e.target.value)} /></label>
@@ -800,7 +836,7 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
 
   return <div className="modal-backdrop" onMouseDown={onClose}>
     <div className="sheet sheet-tall" onMouseDown={e => e.stopPropagation()}>
-      <div className="sheet-grabber" />
+      <SheetGrabber onClose={onClose} />
       <div className="sheet-title-row"><h3>{isNew ? '新增信用卡' : '卡片設定'}</h3><button className="close-btn" onClick={onClose}>×</button></div>
       <label>卡片名稱<input value={name} onChange={e => setName(e.target.value)} placeholder="例如：Sport 卡" /></label>
       <div className="two-col">
@@ -869,8 +905,10 @@ function ProgramEditor({ value, onCancel, onSave }) {
   </div>
 }
 
-function AccountSheet({ email, cards, selectedCard, onClose, onAddCard, onEditCard, onReorder, onSelectCard, onSignOut }) {
-  const [order, setOrder] = useState(cards.map(c => c.id))
+function AccountSheet({ email, cards, selectedCard, onClose, onAddCard, onEditCard, onReorder, onSelectCard, onRestoreCard, onSignOut }) {
+  const active = cards.filter(c => !c.archived)
+  const archived = cards.filter(c => c.archived)
+  const [order, setOrder] = useState(active.map(c => c.id))
   const [dragId, setDragId] = useState(null)
 
   async function dropOn(targetId) {
@@ -886,7 +924,7 @@ function AccountSheet({ email, cards, selectedCard, onClose, onAddCard, onEditCa
   }
 
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
-    <div className="sheet-grabber" /><div className="sheet-title-row"><h3>帳號與卡片</h3><button className="close-btn" onClick={onClose}>×</button></div>
+    <SheetGrabber onClose={onClose} /><div className="sheet-title-row"><h3>帳號與卡片</h3><button className="close-btn" onClick={onClose}>×</button></div>
     <div className="account-email">{email}</div>
     {selectedCard && <button className="settings-action" onClick={onEditCard}>⚙ 目前卡片設定</button>}
     <button className="settings-action" onClick={onAddCard}>＋ 新增信用卡</button>
@@ -913,6 +951,10 @@ function AccountSheet({ email, cards, selectedCard, onClose, onAddCard, onEditCa
       })}
     </div>
     <div className="order-help">桌面可拖曳；手機可用右側 ↑ ↓ 快速排序。</div>
+    {archived.length > 0 && <>
+      <div className="field-label">已封存</div>
+      <div className="archived-list">{archived.map(card => <div className="archived-card" key={card.id}><span>{card.name}</span><button onClick={async()=>{try{await onRestoreCard(card.id)}catch(e){alert(e.message)}}}>恢復</button></div>)}</div>
+    </>}
     <button className="settings-action danger-text" onClick={onSignOut}>登出</button>
   </div></div>
 }
@@ -929,7 +971,7 @@ function StatsSheet({ cards, transactions, month, onClose }) {
   const best = [...rows].filter(r=>r.totalSpend>0).sort((a,b)=>b.effectiveRate-a.effectiveRate)[0]
 
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall stats-sheet" onMouseDown={e=>e.stopPropagation()}>
-    <div className="sheet-grabber" /><div className="sheet-title-row"><h3>{month.replace('-',' / ')} 統計</h3><button className="close-btn" onClick={onClose}>×</button></div>
+    <SheetGrabber onClose={onClose} /><div className="sheet-title-row"><h3>{month.replace('-',' / ')} 統計</h3><button className="close-btn" onClick={onClose}>×</button></div>
     <div className="stats-hero">
       <div><span>總刷卡</span><strong>{formatMoney(totalSpend)}</strong></div>
       <div><span>總回饋</span><strong>{formatMoney(totalReward)}</strong></div>
