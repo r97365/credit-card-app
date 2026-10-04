@@ -756,3 +756,82 @@ textarea{
   user-select:text !important;
   -webkit-touch-callout:default !important;
 }
+
+/* v0.3.6: premium card finish — richer gradients, soft gloss, depth, metallic accent */
+.wallet-card{
+  background:
+    radial-gradient(120% 95% at 14% -12%, rgba(255,255,255,.22) 0%, rgba(255,255,255,.07) 28%, transparent 54%),
+    radial-gradient(95% 110% at 108% 110%, rgba(0,0,0,.30) 0%, rgba(0,0,0,.08) 48%, transparent 72%),
+    linear-gradient(138deg, var(--card-a) 0%, var(--card-b) 58%, var(--card-a) 128%);
+  box-shadow:
+    0 20px 46px rgba(0,0,0,.30),
+    inset 0 1px 0 rgba(255,255,255,.16),
+    inset 0 -1px 0 rgba(0,0,0,.22);
+  isolation:isolate;
+}
+.wallet-card:before{
+  content:"";
+  position:absolute;
+  inset:1px;
+  border-radius:27px;
+  background:
+    linear-gradient(110deg, rgba(255,255,255,.08), transparent 28%),
+    repeating-linear-gradient(115deg, rgba(255,255,255,.012) 0 1px, rgba(0,0,0,.008) 1px 3px);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.045);
+  pointer-events:none;
+  z-index:0;
+}
+.wallet-card:after{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:28px;
+  background:
+    linear-gradient(118deg,
+      transparent 16%,
+      rgba(255,255,255,.025) 31%,
+      rgba(255,255,255,.14) 43%,
+      rgba(255,255,255,.035) 51%,
+      transparent 67%);
+  opacity:.78;
+  pointer-events:none;
+  z-index:1;
+}
+.wallet-card.selected{
+  box-shadow:
+    0 24px 58px rgba(0,0,0,.42),
+    inset 0 1px 0 rgba(255,255,255,.18),
+    inset 0 -1px 0 rgba(0,0,0,.24);
+}
+.wallet-card .card-top,
+.wallet-card .card-name,
+.wallet-card .card-bottom,
+.wallet-card .stack-peek-label{
+  z-index:3;
+}
+.wallet-card .card-name{
+  text-shadow:0 1px 16px rgba(0,0,0,.20);
+}
+.wallet-card .card-bottom span:last-child{
+  color:#e4cb8a;
+  background:linear-gradient(180deg,#f3dda0 0%,#d7b76b 55%,#f0d693 100%);
+  -webkit-background-clip:text;
+  background-clip:text;
+  -webkit-text-fill-color:transparent;
+  text-shadow:0 1px 14px rgba(225,190,105,.10);
+}
+.palette{
+  overflow:hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.14),
+    inset 0 -1px 0 rgba(0,0,0,.18);
+}
+.palette:before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:
+    radial-gradient(100% 100% at 12% -10%, rgba(255,255,255,.22), transparent 55%),
+    linear-gradient(118deg, transparent 25%, rgba(255,255,255,.14) 47%, transparent 68%);
+  pointer-events:none;
+}
