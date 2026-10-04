@@ -366,3 +366,43 @@ h2,h3{margin:0}
     font-size:15px;
   }
 }
+
+/* v0.2.7: robust drag sorting and modal scroll containment */
+.modal-backdrop{
+  overscroll-behavior:contain;
+  touch-action:none;
+}
+.sheet{
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+}
+.sheet-tall{
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  touch-action:pan-y;
+}
+.sheet-grabber-zone{
+  height:32px;
+  margin:-4px 0 0;
+  touch-action:none;
+}
+.sheet-title-row{
+  min-height:54px;
+}
+.wallet-stack.reordering{
+  touch-action:none;
+  -webkit-user-select:none;
+  user-select:none;
+}
+.wallet-stack.reordering .wallet-card{
+  transition:transform .16s cubic-bezier(.2,.8,.2,1), box-shadow .16s ease;
+}
+.wallet-card.dragging-card{
+  transform:translateY(calc(var(--drag-origin-index) * 38px + var(--drag-y))) scale(1.025) !important;
+  z-index:50 !important;
+  box-shadow:0 30px 78px rgba(0,0,0,.52);
+  transition:none !important;
+}
+.wallet-reorder-hint{
+  bottom:-4px;
+}
