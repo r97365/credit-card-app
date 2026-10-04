@@ -198,3 +198,5 @@ h2,h3{margin:0}
 .wallet-stack.reordering .wallet-card{transition:none}
 .wallet-card.dragging-card{transform:translateY(calc(var(--stack-index) * 38px + var(--drag-y))) scale(1.015);z-index:30;box-shadow:0 28px 70px rgba(0,0,0,.48);touch-action:none}
 .wallet-card{touch-action:pan-y;-webkit-user-select:none;user-select:none}
+
+.app-version{text-align:center;color:#606872;font-size:10px;margin:18px 0 2px}
