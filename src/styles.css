@@ -535,3 +535,50 @@ h2,h3{margin:0}
 .wallet-drop-slot span{
   margin-bottom:2px;
 }
+
+/* v0.3.1: closer to Apple Wallet reorder — keep the compact stack, only lift the dragged card */
+.wallet-stack.reordering{
+  height:270px;
+}
+.wallet-stack.reordering .wallet-card{
+  height:190px !important;
+  border-radius:28px;
+  padding:22px;
+  opacity:1;
+  transform:translateY(calc(var(--stack-index) * 38px)) scale(calc(1 - var(--stack-index) * .025)) !important;
+  transition:transform .20s cubic-bezier(.22,.78,.22,1), box-shadow .16s ease;
+}
+.wallet-stack.reordering .wallet-card .card-name{
+  left:22px;
+  bottom:55px;
+  font-size:27px;
+}
+.wallet-stack.reordering .wallet-card .card-top{
+  font-size:12px;
+}
+.wallet-stack.reordering .wallet-card .card-bottom{
+  left:22px;
+  right:22px;
+  bottom:20px;
+  font-size:12px;
+}
+.wallet-stack.reordering .wallet-card .card-bottom span:last-child{
+  font-size:32px;
+}
+.wallet-card.dragging-card{
+  left:0 !important;
+  right:0 !important;
+  transform:translateY(calc(var(--drag-origin-index) * 38px + var(--drag-y))) scale(1.018) !important;
+  z-index:80 !important;
+  opacity:1 !important;
+  box-shadow:0 26px 68px rgba(0,0,0,.52);
+  transition:none !important;
+}
+.drag-position-badge,
+.wallet-drop-slot{
+  display:none !important;
+}
+.wallet-stack.reordering .wallet-reorder-hint{
+  color:#7f8791;
+  font-weight:500;
+}
