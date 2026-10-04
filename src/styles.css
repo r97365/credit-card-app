@@ -1,0 +1,95 @@
+:root {
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang TC", "Noto Sans TC", sans-serif;
+  color: #f5f3ed;
+  background: #0b0c0f;
+  font-synthesis: none;
+  --muted:#8d939d;
+  --panel:#15181d;
+  --panel2:#1a1e24;
+  --line:rgba(255,255,255,.08);
+  --accent:#d6b978;
+  --good:#77b89c;
+  --danger:#c87171;
+}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at 50% -10%,#20242b 0,#0b0c0f 42%);min-height:100vh}
+button,input{font:inherit}
+button{cursor:pointer}
+.app-shell{width:min(100%,480px);margin:0 auto;min-height:100vh;padding:calc(18px + env(safe-area-inset-top)) 18px calc(108px + env(safe-area-inset-bottom))}
+.topbar,.period-bar,.summary-head,.section-head,.program-row,.transaction,.card-top,.card-bottom,.spend-row{display:flex;align-items:center;justify-content:space-between}
+.eyebrow{font-size:11px;letter-spacing:.18em;color:#737a85;margin-bottom:4px}
+h1{font-size:30px;margin:0;font-weight:700;letter-spacing:-.035em}
+h2,h3{margin:0}
+.icon-btn,.ghost-btn,.tip-button,.mini-btn{border:0;background:transparent;color:inherit}
+.icon-btn{width:42px;height:42px;border-radius:14px;background:rgba(255,255,255,.055);font-size:21px}
+.period-bar{margin:24px 0 18px}
+.month-pill{background:#f2efe8;color:#121417;border:0;border-radius:999px;padding:10px 15px;font-weight:700}
+.ghost-btn{color:#a6abb3;padding:8px}
+.wallet-stack{height:270px;position:relative;margin-bottom:14px}
+.wallet-card{position:absolute;left:0;right:0;height:190px;border:0;border-radius:28px;padding:22px;text-align:left;color:#fff;background:linear-gradient(135deg,var(--card-a),var(--card-b));box-shadow:0 18px 42px rgba(0,0,0,.28);transform:translateY(calc(var(--stack-index) * 38px)) scale(calc(1 - var(--stack-index) * .025));transform-origin:top center;z-index:calc(10 - var(--stack-index));transition:.28s cubic-bezier(.2,.8,.2,1);overflow:hidden}
+.wallet-card:after{content:"";position:absolute;inset:0;background:linear-gradient(120deg,transparent 25%,rgba(255,255,255,.08) 48%,transparent 70%);pointer-events:none}
+.wallet-card.selected{box-shadow:0 22px 52px rgba(0,0,0,.38)}
+.card-top,.card-bottom{position:relative;z-index:1;font-size:12px;letter-spacing:.08em;color:rgba(255,255,255,.72)}
+.card-name{position:absolute;left:22px;bottom:55px;font-size:27px;font-weight:750;letter-spacing:-.03em}
+.card-bottom{position:absolute;bottom:20px;left:22px;right:22px}
+.card-bottom span:last-child{font-size:32px;color:#e0c88f;font-weight:800}
+.summary-card{background:linear-gradient(180deg,rgba(27,31,37,.96),rgba(18,21,25,.96));border:1px solid var(--line);border-radius:26px;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.28)}
+.title-line{display:flex;align-items:center;gap:6px}
+.title-line h2{font-size:23px}
+.tip-button{font-size:18px;color:#9299a4}
+.muted,.reward-hero span,.rate-box span,.meta-grid span,.transaction span{color:var(--muted);font-size:12px}
+.status-badge{font-size:12px;color:var(--good);background:rgba(119,184,156,.12);padding:7px 10px;border-radius:999px}
+.status-badge.warn{color:var(--accent);background:rgba(214,185,120,.12)}
+.status-badge.danger{color:#e79393;background:rgba(200,113,113,.12)}
+.tip-popover{background:#20242a;border:1px solid var(--line);border-radius:16px;padding:13px 14px;margin-top:14px;font-size:13px;color:#c7cbd1}
+.tip-popover strong{display:block;color:#fff;margin-bottom:5px}
+.spend-row{margin-top:18px}
+.spend-row strong{font-size:28px;letter-spacing:-.03em}
+.spend-row span{color:#777e88}
+.progress{height:7px;background:#2a2e35;border-radius:999px;overflow:hidden;margin:10px 0 20px}
+.progress div{height:100%;background:linear-gradient(90deg,#7a9f8c,#d1b778);border-radius:inherit}
+.reward-hero{display:grid;grid-template-columns:1fr auto;gap:12px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:18px 0}
+.reward-hero>div{display:flex;flex-direction:column;gap:4px}
+.reward-hero strong{font-size:25px}
+.rate-box{text-align:right}
+.rate-box strong{color:#e0c88f}
+.program-list{padding:9px 0}
+.program-row{padding:12px 0}
+.program-main,.program-value{display:flex;align-items:center;gap:8px}
+.program-name{width:22px;height:22px;border-radius:8px;background:#252a31;display:grid;place-items:center;font-size:12px}
+.program-rate{color:#a8afb8;font-size:13px}
+.program-value span{font-size:12px;color:#747b85}
+.program-value .done{color:var(--good);font-size:14px}
+.meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px}
+.meta-grid>div{background:#101317;border:1px solid rgba(255,255,255,.055);border-radius:16px;padding:13px}
+.meta-grid span,.meta-grid strong{display:block}
+.meta-grid strong{margin-top:5px;font-size:16px}
+.transactions-section{margin-top:24px}
+.section-head{margin-bottom:10px}
+.section-head h3{font-size:18px}
+.transaction-list{border-radius:20px;overflow:hidden;background:#12151a;border:1px solid var(--line)}
+.transaction{padding:14px 15px;border-bottom:1px solid rgba(255,255,255,.055)}
+.transaction:last-child{border-bottom:0}
+.transaction>div:first-child,.tx-right{display:flex;flex-direction:column;gap:4px}
+.tx-right{align-items:flex-end}
+.mini-btn{color:#9da4ad;font-size:11px;padding:0}
+.transaction.excluded{opacity:.55}
+.transaction.excluded strong{text-decoration:line-through;text-decoration-thickness:1px}
+.bottom-nav{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(10px + env(safe-area-inset-bottom));width:min(calc(100% - 24px),456px);height:70px;background:rgba(19,22,27,.88);backdrop-filter:blur(22px);border:1px solid var(--line);border-radius:24px;display:grid;grid-template-columns:1fr 90px 1fr;align-items:center;padding:0 18px;box-shadow:0 16px 42px rgba(0,0,0,.38);z-index:50}
+.nav-item{border:0;background:transparent;color:#737b86;display:flex;flex-direction:column;gap:4px;align-items:center}
+.nav-item.active{color:#f0eee8}
+.nav-item span{font-size:18px}
+.nav-item small{font-size:10px}
+.add-main{width:56px;height:56px;border-radius:20px;border:1px solid rgba(255,255,255,.22);background:#f1eee8;color:#111318;font-size:34px;line-height:1;justify-self:center;box-shadow:0 8px 26px rgba(0,0,0,.35)}
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.62);backdrop-filter:blur(7px);display:flex;align-items:flex-end;z-index:100}
+.sheet{width:min(100%,480px);margin:0 auto;background:#171a1f;border:1px solid var(--line);border-bottom:0;border-radius:28px 28px 0 0;padding:12px 18px calc(24px + env(safe-area-inset-bottom));box-shadow:0 -18px 58px rgba(0,0,0,.46)}
+.sheet-grabber{width:42px;height:5px;border-radius:999px;background:#4c525c;margin:0 auto 16px}
+.sheet h3{font-size:23px;margin-bottom:14px}
+.selected-mini-card{border-radius:16px;padding:14px;background:linear-gradient(135deg,#242932,#3a424e);margin-bottom:14px;font-weight:700}
+.selected-mini-card span{float:right;color:#a3a9b1;font-size:12px}
+.sheet label{display:block;color:#949aa4;font-size:12px;margin:12px 0}
+.sheet input{width:100%;margin-top:7px;border:1px solid var(--line);background:#101216;color:#fff;border-radius:14px;padding:14px 13px;outline:none}
+.sheet input:focus{border-color:rgba(214,185,120,.5)}
+.primary-btn{width:100%;margin-top:12px;padding:14px;border-radius:16px;border:0;background:#f0ede7;color:#111318;font-weight:800}
+.primary-btn:disabled{opacity:.35}
+@media(max-width:380px){.wallet-stack{height:250px}.wallet-card{height:176px}.reward-hero strong{font-size:22px}}
