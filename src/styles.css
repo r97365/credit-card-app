@@ -662,3 +662,57 @@ h2,h3{margin:0}
   font-size:24px;
   line-height:1;
 }
+
+/* v0.3.3: higher-contrast card palettes + visible names in stacked cards */
+.wallet-card{
+  overflow:visible;
+}
+.wallet-card:after{
+  border-radius:28px;
+}
+.wallet-card.stacked-behind .card-top,
+.wallet-card.stacked-behind .card-name,
+.wallet-card.stacked-behind .card-bottom{
+  opacity:0;
+  pointer-events:none;
+}
+.stack-peek-label{
+  position:absolute;
+  left:20px;
+  right:20px;
+  top:10px;
+  z-index:4;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  color:#fff;
+  text-shadow:0 1px 8px rgba(0,0,0,.45);
+  pointer-events:none;
+}
+.stack-peek-label strong{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:13px;
+  letter-spacing:-.01em;
+}
+.stack-peek-label span{
+  flex:0 0 auto;
+  color:rgba(255,255,255,.68);
+  font-size:10px;
+}
+.wallet-stack.reordering .wallet-card.stacked-behind .stack-peek-label{
+  opacity:.9;
+}
+.palette{
+  position:relative;
+}
+.palette:after{
+  content:"";
+  position:absolute;
+  inset:0;
+  border-radius:inherit;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);
+}
