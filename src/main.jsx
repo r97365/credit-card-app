@@ -3,8 +3,10 @@ import { createRoot } from 'react-dom/client'
 import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
+import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations } from './offlineStore'
+import { flushMutationQueue, resolveConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.3.6'
+const APP_VERSION = '0.4.0'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
@@ -47,6 +49,12 @@ function App() {
   const [undoDelete, setUndoDelete] = useState(null)
   const [loadingData, setLoadingData] = useState(false)
   const [error, setError] = useState('')
+  const [online, setOnline] = useState(navigator.onLine)
+  const [pendingSync, setPendingSync] = useState(0)
+  const [syncConflicts, setSyncConflicts] = useState([])
+  const [syncBusy, setSyncBusy] = useState(false)
+  const [showSyncSheet, setShowSyncSheet] = useState(false)
+  const [snapshotSavedAt, setSnapshotSavedAt] = useState(null)
 
   useEffect(() => {
     let stopped = false
@@ -86,6 +94,38 @@ function App() {
       window.clearInterval(timer)
     }
   }, [])
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setOnline(true)
+      if (session?.user) syncNow(true)
+    }
+    const handleOffline = () => setOnline(false)
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [session?.user?.id])
+
+  useEffect(() => {
+    if (!session?.user) return
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) syncNow(true)
+    }
+    window.addEventListener('focus', handleVisible)
+    document.addEventListener('visibilitychange', handleVisible)
+    return () => {
+      window.removeEventListener('focus', handleVisible)
+      document.removeEventListener('visibilitychange', handleVisible)
+    }
+  }, [session?.user?.id])
 
   useEffect(() => {
     if (!supabase) {
