@@ -147,74 +147,171 @@ function App() {
     }
   }, [session?.user?.id])
 
-  async function loadData(preferredSelectedId = null) {
+  useEffect(() => {
+    if (!session?.user || (!cards.length && !transactions.length)) return
+    saveSnapshot(session.user.id, { cards, transactions })
+      .then(() => setSnapshotSavedAt(new Date().toISOString()))
+      .catch(() => {})
+  }, [session?.user?.id, cards, transactions])
+
+  async function refreshSyncStatus() {
+    if (!session?.user) return
+    const [pending, conflicts] = await Promise.all([
+      countQueuedMutations(session.user.id),
+      loadConflicts(session.user.id),
+    ])
+    setPendingSync(pending)
+    setSyncConflicts(conflicts)
+  }
+
+  async function syncNow(reload = false) {
+    if (!session?.user || !navigator.onLine || syncBusy) return
+    setSyncBusy(true)
+    try {
+      await flushMutationQueue(session.user.id)
+      await refreshSyncStatus()
+      if (reload) await loadData(null, { skipFlush:true })
+    } catch (e) {
+      if (!networkError(e)) setError(e.message)
+    } finally {
+      setSyncBusy(false)
+    }
+  }
+
+  async function queueLocalMutation(mutation) {
+    if (!session?.user) return
+    await queueMutation(session.user.id, mutation)
+    await refreshSyncStatus()
+    if (navigator.onLine) {
+      flushMutationQueue(session.user.id)
+        .then(refreshSyncStatus)
+        .catch(e => { if (!networkError(e)) setError(e.message) })
+    }
+  }
+
+  async function loadData(preferredSelectedId = null, options = {}) {
+    if (!session?.user) return
     setLoadingData(true)
     setError('')
-    const [cardsRes, programsRes, txRes, exclusionsRes] = await Promise.all([
-      supabase.from('cards').select('*').order('sort_order').order('created_at'),
-      supabase.from('reward_programs').select('*').order('created_at'),
-      supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
-      supabase.from('transaction_reward_exclusions').select('*'),
-    ])
 
-    const firstError = cardsRes.error || programsRes.error || txRes.error || exclusionsRes.error
-    if (firstError) {
-      setError(firstError.message)
+    try {
+      if (!navigator.onLine) {
+        const snapshot = await getSnapshot(session.user.id)
+        if (snapshot) {
+          setCards(snapshot.cards || [])
+          setTransactions(snapshot.transactions || [])
+          setSnapshotSavedAt(snapshot.savedAt || null)
+          const active = (snapshot.cards || []).filter(c => !c.archived)
+          setSelectedCardId(prev =>
+            preferredSelectedId && active.some(c => c.id === preferredSelectedId)
+              ? preferredSelectedId
+              : active.some(c => c.id === prev)
+                ? prev
+                : active[0]?.id || null
+          )
+        } else {
+          setError('目前離線，而且這台裝置還沒有離線資料。')
+        }
+        await refreshSyncStatus()
+        return
+      }
+
+      if (!options.skipFlush) {
+        try { await flushMutationQueue(session.user.id) } catch (e) {
+          if (!networkError(e)) throw e
+        }
+      }
+
+      const [cardsRes, programsRes, txRes, exclusionsRes] = await Promise.all([
+        supabase.from('cards').select('*').order('sort_order').order('created_at'),
+        supabase.from('reward_programs').select('*').order('created_at'),
+        supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
+        supabase.from('transaction_reward_exclusions').select('*'),
+      ])
+
+      const firstError = cardsRes.error || programsRes.error || txRes.error || exclusionsRes.error
+      if (firstError) throw firstError
+
+      const programsByCard = new Map()
+      for (const p of programsRes.data || []) {
+        const list = programsByCard.get(p.card_id) || []
+        list.push(fromProgramRow(p))
+        programsByCard.set(p.card_id, list)
+      }
+
+      const exclusionMap = new Map()
+      for (const x of exclusionsRes.data || []) {
+        const list = exclusionMap.get(x.transaction_id) || []
+        list.push(x.reward_program_id)
+        exclusionMap.set(x.transaction_id, list)
+      }
+
+      let nextCards = (cardsRes.data || []).map(row => ({
+        id: row.id,
+        name: row.name,
+        bank: row.bank || '',
+        last4: row.last4 || '',
+        monthlySpendLimit: Number(row.monthly_spend_limit || 0),
+        colors: normalizeCardColors(row.color_a, row.color_b),
+        tip: row.tip || '',
+        rewardDateBasis: row.reward_date_basis,
+        rewardPrograms: programsByCard.get(row.id) || [],
+        sortOrder: Number(row.sort_order || 0),
+        archived: Number(row.sort_order || 0) < 0,
+        updatedAt: row.updated_at,
+      })).sort((a,b) => (a.archived === b.archived ? a.sortOrder - b.sortOrder : a.archived ? 1 : -1))
+
+      let nextTx = (txRes.data || []).map(row => ({
+        id: row.id,
+        cardId: row.card_id,
+        date: row.transaction_date,
+        postedDate: row.posted_date,
+        title: row.title,
+        amount: Number(row.amount),
+        excluded: row.excluded,
+        reconciled: row.reconciled,
+        programExclusions: exclusionMap.get(row.id) || [],
+        updatedAt: row.updated_at,
+      }))
+
+      const queue = await getQueuedMutations(session.user.id)
+      const snapshot = await getSnapshot(session.user.id)
+      if (queue.length && snapshot) {
+        nextCards = mergeCardsWithLocalPending(nextCards, snapshot.cards || [], queue)
+        nextTx = mergeTransactionsWithLocalPending(nextTx, snapshot.transactions || [], queue)
+      }
+
+      setCards(nextCards)
+      setTransactions(nextTx)
+      await saveSnapshot(session.user.id, { cards:nextCards, transactions:nextTx })
+      setSnapshotSavedAt(new Date().toISOString())
+
+      const active = nextCards.filter(c => !c.archived)
+      setSelectedCardId(prev =>
+        preferredSelectedId && active.some(c => c.id === preferredSelectedId)
+          ? preferredSelectedId
+          : active.some(c => c.id === prev)
+            ? prev
+            : active[0]?.id || null
+      )
+      await refreshSyncStatus()
+    } catch (e) {
+      if (networkError(e)) {
+        setOnline(false)
+        const snapshot = await getSnapshot(session.user.id)
+        if (snapshot) {
+          setCards(snapshot.cards || [])
+          setTransactions(snapshot.transactions || [])
+          setSnapshotSavedAt(snapshot.savedAt || null)
+        } else {
+          setError('網路連線失敗，而且沒有離線快取可以載入。')
+        }
+      } else {
+        setError(e.message)
+      }
+    } finally {
       setLoadingData(false)
-      return
     }
-
-    const programsByCard = new Map()
-    for (const p of programsRes.data || []) {
-      const list = programsByCard.get(p.card_id) || []
-      list.push(fromProgramRow(p))
-      programsByCard.set(p.card_id, list)
-    }
-
-    const exclusionMap = new Map()
-    for (const x of exclusionsRes.data || []) {
-      const list = exclusionMap.get(x.transaction_id) || []
-      list.push(x.reward_program_id)
-      exclusionMap.set(x.transaction_id, list)
-    }
-
-    const nextCards = (cardsRes.data || []).map(row => ({
-      id: row.id,
-      name: row.name,
-      bank: row.bank || '',
-      last4: row.last4 || '',
-      monthlySpendLimit: Number(row.monthly_spend_limit || 0),
-      colors: normalizeCardColors(row.color_a, row.color_b),
-      tip: row.tip || '',
-      rewardDateBasis: row.reward_date_basis,
-      rewardPrograms: programsByCard.get(row.id) || [],
-      sortOrder: Number(row.sort_order || 0),
-      archived: Number(row.sort_order || 0) < 0,
-    })).sort((a,b) => (a.archived === b.archived ? a.sortOrder - b.sortOrder : a.archived ? 1 : -1))
-
-    const nextTx = (txRes.data || []).map(row => ({
-      id: row.id,
-      cardId: row.card_id,
-      date: row.transaction_date,
-      postedDate: row.posted_date,
-      title: row.title,
-      amount: Number(row.amount),
-      excluded: row.excluded,
-      reconciled: row.reconciled,
-      programExclusions: exclusionMap.get(row.id) || [],
-    }))
-
-    setCards(nextCards)
-    setTransactions(nextTx)
-    const activeCards = nextCards.filter(c => !c.archived)
-    setSelectedCardId(prev =>
-      preferredSelectedId && activeCards.some(c => c.id === preferredSelectedId)
-        ? preferredSelectedId
-        : activeCards.some(c => c.id === prev)
-          ? prev
-          : activeCards[0]?.id || null
-    )
-    setLoadingData(false)
   }
 
   const activeCards = cards.filter(c => !c.archived)
