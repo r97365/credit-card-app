@@ -4,7 +4,7 @@ import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 
-const APP_VERSION = '0.2.6'
+const APP_VERSION = '0.2.7'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const PALETTES = [
@@ -192,6 +192,40 @@ function App() {
       .map(p => ({ ...p, cardName:card.name })))
       .sort((a,b) => a.endDate.localeCompare(b.endDate))
   }, [activeCards])
+
+  const modalOpen = showRangePicker || showAddTx || showCardEditor || showSettings || showStats || Boolean(editingTransaction)
+
+  useEffect(() => {
+    if (!modalOpen) return
+
+    const scrollY = window.scrollY
+    const body = document.body
+    const previous = {
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width,
+      overflow: body.style.overflow,
+    }
+
+    body.style.position = 'fixed'
+    body.style.top = `-${scrollY}px`
+    body.style.left = '0'
+    body.style.right = '0'
+    body.style.width = '100%'
+    body.style.overflow = 'hidden'
+
+    return () => {
+      body.style.position = previous.position
+      body.style.top = previous.top
+      body.style.left = previous.left
+      body.style.right = previous.right
+      body.style.width = previous.width
+      body.style.overflow = previous.overflow
+      window.scrollTo(0, scrollY)
+    }
+  }, [modalOpen])
 
   async function addTransaction(tx) {
     const { data, error: insertError } = await supabase.from('transactions').insert({
@@ -634,14 +668,87 @@ function AuthScreen({ configError }) {
 }
 
 function SheetGrabber({ onClose }) {
-  const [startY,setStartY] = useState(null)
-  const [dragY,setDragY] = useState(0)
-  return <div
-    className="sheet-grabber-zone"
-    onTouchStart={e=>{setStartY(e.touches[0].clientY);setDragY(0)}}
-    onTouchMove={e=>{if(startY!=null)setDragY(Math.max(0,e.touches[0].clientY-startY))}}
-    onTouchEnd={()=>{if(dragY>65)onClose();setStartY(null);setDragY(0)}}
-  ><div className="sheet-grabber" style={{transform:`translateY(${Math.min(dragY,18)}px)`}} /></div>
+  const zoneRef = React.useRef(null)
+
+  useEffect(() => {
+    const zone = zoneRef.current
+    const sheet = zone?.parentElement
+    if (!sheet) return
+
+    let startY = null
+    let dragY = 0
+    let dragging = false
+
+    function resetSheet(animated = true) {
+      sheet.style.transition = animated ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none'
+      sheet.style.transform = 'translateY(0)'
+      window.setTimeout(() => {
+        if (sheet) sheet.style.transition = ''
+      }, 230)
+    }
+
+    function handleStart(e) {
+      const touch = e.touches?.[0]
+      if (!touch || sheet.scrollTop > 0) return
+      if (e.target.closest('button,input,select,textarea')) return
+
+      const rect = sheet.getBoundingClientRect()
+      const localY = touch.clientY - rect.top
+      if (localY < 0 || localY > 118) return
+
+      startY = touch.clientY
+      dragY = 0
+      dragging = true
+      sheet.style.transition = 'none'
+    }
+
+    function handleMove(e) {
+      if (!dragging || startY == null) return
+      const touch = e.touches?.[0]
+      if (!touch) return
+
+      const dy = touch.clientY - startY
+      if (dy <= 0) {
+        dragY = 0
+        sheet.style.transform = 'translateY(0)'
+        return
+      }
+
+      e.preventDefault()
+      dragY = Math.min(dy, 220)
+      sheet.style.transform = `translateY(${dragY}px)`
+    }
+
+    function handleEnd() {
+      if (!dragging) return
+      const shouldClose = dragY > 76
+      startY = null
+      dragging = false
+
+      if (shouldClose) {
+        sheet.style.transition = 'transform .18s ease-out'
+        sheet.style.transform = 'translateY(110%)'
+        window.setTimeout(onClose, 150)
+      } else {
+        resetSheet(true)
+      }
+      dragY = 0
+    }
+
+    sheet.addEventListener('touchstart', handleStart, { passive:true })
+    sheet.addEventListener('touchmove', handleMove, { passive:false })
+    sheet.addEventListener('touchend', handleEnd, { passive:true })
+    sheet.addEventListener('touchcancel', handleEnd, { passive:true })
+
+    return () => {
+      sheet.removeEventListener('touchstart', handleStart)
+      sheet.removeEventListener('touchmove', handleMove)
+      sheet.removeEventListener('touchend', handleEnd)
+      sheet.removeEventListener('touchcancel', handleEnd)
+    }
+  }, [onClose])
+
+  return <div ref={zoneRef} className="sheet-grabber-zone"><div className="sheet-grabber" /></div>
 }
 
 function EyeIcon({ open }) {
@@ -729,58 +836,156 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
   const selectedIndex = Math.max(0, cards.findIndex(c => c.id === selectedId))
   const ordered = [...cards.slice(selectedIndex), ...cards.slice(0, selectedIndex)]
   const [drag, setDrag] = useState(null)
-  const longPressRef = React.useRef(null)
+  const dragRef = React.useRef(null)
+  const timerRef = React.useRef(null)
 
-  function startPress(e, cardId, index) {
-    if (cards.length < 2) return
-    const pointerId = e.pointerId
-    const startY = e.clientY
-    longPressRef.current = setTimeout(() => {
-      e.currentTarget?.setPointerCapture?.(pointerId)
-      setDrag({ cardId, index, startY, currentY:startY, active:true })
-    }, 320)
+  function unlockDragScroll(state = dragRef.current) {
+    if (!state?.scrollLock) return
+    const { scrollY, bodyPrevious, preventMove } = state.scrollLock
+    document.removeEventListener('touchmove', preventMove)
+    const body = document.body
+    body.style.position = bodyPrevious.position
+    body.style.top = bodyPrevious.top
+    body.style.left = bodyPrevious.left
+    body.style.right = bodyPrevious.right
+    body.style.width = bodyPrevious.width
+    body.style.overflow = bodyPrevious.overflow
+    window.scrollTo(0, scrollY)
   }
 
-  function movePress(e) {
-    if (!drag?.active) return
+  function activateDrag(cardId, index, startY) {
+    const body = document.body
+    const scrollY = window.scrollY
+    const bodyPrevious = {
+      position:body.style.position,
+      top:body.style.top,
+      left:body.style.left,
+      right:body.style.right,
+      width:body.style.width,
+      overflow:body.style.overflow,
+    }
+    const preventMove = e => e.preventDefault()
+    document.addEventListener('touchmove', preventMove, { passive:false })
+
+    body.style.position = 'fixed'
+    body.style.top = `-${scrollY}px`
+    body.style.left = '0'
+    body.style.right = '0'
+    body.style.width = '100%'
+    body.style.overflow = 'hidden'
+
+    const state = {
+      cardId,
+      index,
+      startY,
+      currentY:startY,
+      targetIndex:index,
+      active:true,
+      scrollLock:{ scrollY, bodyPrevious, preventMove },
+    }
+    dragRef.current = state
+    setDrag(state)
+    if (navigator.vibrate) navigator.vibrate(12)
+  }
+
+  function handleTouchStart(e, cardId, index) {
+    if (cards.length < 2) {
+      dragRef.current = { active:false, cardId, index, startY:e.touches[0].clientY }
+      return
+    }
+
+    const startY = e.touches[0].clientY
+    dragRef.current = { active:false, pending:true, cardId, index, startY, currentY:startY }
+    clearTimeout(timerRef.current)
+    timerRef.current = window.setTimeout(() => activateDrag(cardId, index, startY), 300)
+  }
+
+  function handleTouchMove(e, cardId) {
+    const state = dragRef.current
+    if (!state || state.cardId !== cardId) return
+    const y = e.touches[0].clientY
+
+    if (!state.active) {
+      if (Math.abs(y - state.startY) > 8) {
+        clearTimeout(timerRef.current)
+        state.pending = false
+      }
+      return
+    }
+
     e.preventDefault()
-    setDrag(prev => ({ ...prev, currentY:e.clientY }))
+    const slot = 38
+    const delta = y - state.startY
+    const rawTarget = state.index + Math.round(delta / slot)
+    const targetIndex = Math.max(0, Math.min(ordered.length - 1, rawTarget))
+    const nextState = { ...state, currentY:y, targetIndex }
+    dragRef.current = nextState
+    setDrag(nextState)
   }
 
-  async function endPress(e, cardId) {
-    clearTimeout(longPressRef.current)
-    longPressRef.current = null
-    if (!drag?.active || drag.cardId !== cardId) {
+  async function handleTouchEnd(cardId) {
+    clearTimeout(timerRef.current)
+    const state = dragRef.current
+    if (!state || state.cardId !== cardId) return
+
+    if (!state.active) {
+      dragRef.current = null
       setDrag(null)
       onSelect(cardId)
       return
     }
 
-    const delta = drag.currentY - drag.startY
-    const steps = Math.round(delta / 38)
-    const targetIndex = Math.max(0, Math.min(ordered.length - 1, drag.index + steps))
-    if (targetIndex !== drag.index) {
+    unlockDragScroll(state)
+
+    if (state.targetIndex !== state.index) {
       const next = [...ordered]
-      const [moved] = next.splice(drag.index,1)
-      next.splice(targetIndex,0,moved)
-      await onReorder(next.map(x => x.id))
+      const [moved] = next.splice(state.index, 1)
+      next.splice(state.targetIndex, 0, moved)
+      setDrag(null)
+      dragRef.current = null
       onSelect(moved.id)
+      await onReorder(next.map(card => card.id))
+    } else {
+      setDrag(null)
+      dragRef.current = null
+      onSelect(cardId)
     }
-    setDrag(null)
+  }
+
+  useEffect(() => () => {
+    clearTimeout(timerRef.current)
+    unlockDragScroll()
+  }, [])
+
+  function displayIndex(index) {
+    if (!drag?.active) return index
+    if (index === drag.index) return index
+    if (drag.targetIndex > drag.index && index > drag.index && index <= drag.targetIndex) return index - 1
+    if (drag.targetIndex < drag.index && index >= drag.targetIndex && index < drag.index) return index + 1
+    return index
   }
 
   return <section className={`wallet-stack ${drag?.active ? 'reordering' : ''}`} aria-label="選擇信用卡">
     {ordered.map((card, index) => {
       const dragging = drag?.active && drag.cardId === card.id
-      const dy = dragging ? Math.max(-76, Math.min(76, drag.currentY - drag.startY)) : 0
+      const shownIndex = displayIndex(index)
+      const maxTravel = Math.max(38, (ordered.length - 1) * 38)
+      const dy = dragging ? Math.max(-maxTravel, Math.min(maxTravel, drag.currentY - drag.startY)) : 0
+
       return <button
         key={card.id}
         className={`wallet-card ${index === 0 ? 'selected' : ''} ${dragging ? 'dragging-card' : ''}`}
-        style={{ '--stack-index': index, '--card-a': card.colors[0], '--card-b': card.colors[1], '--drag-y': `${dy}px` }}
-        onPointerDown={e => startPress(e, card.id, index)}
-        onPointerMove={movePress}
-        onPointerUp={e => endPress(e, card.id)}
-        onPointerCancel={() => { clearTimeout(longPressRef.current); setDrag(null) }}
+        style={{
+          '--stack-index': shownIndex,
+          '--drag-origin-index': index,
+          '--card-a': card.colors[0],
+          '--card-b': card.colors[1],
+          '--drag-y': `${dy}px`,
+        }}
+        onTouchStart={e => handleTouchStart(e, card.id, index)}
+        onTouchMove={e => handleTouchMove(e, card.id)}
+        onTouchEnd={() => handleTouchEnd(card.id)}
+        onTouchCancel={() => handleTouchEnd(card.id)}
         onContextMenu={e => e.preventDefault()}
       >
         <div className="card-top"><span>{card.bank || 'CARD'}</span><span>{card.last4 ? `•••• ${card.last4}` : ''}</span></div>
@@ -788,7 +993,7 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
         <div className="card-bottom"><span>REWARDS</span><span>%</span></div>
       </button>
     })}
-    {cards.length > 1 && <div className="wallet-reorder-hint">長按卡片可拖曳排序</div>}
+    {cards.length > 1 && <div className="wallet-reorder-hint">長按卡片後上下拖曳排序</div>}
   </section>
 }
 
