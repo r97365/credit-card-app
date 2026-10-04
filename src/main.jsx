@@ -4,16 +4,25 @@ import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 
-const APP_VERSION = '0.3.2'
+const APP_VERSION = '0.3.3'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
-const PALETTES = [
+const LEGACY_PALETTES = [
   ['#222831','#38414d'],
   ['#193f32','#2e6654'],
   ['#3a1f4d','#704b87'],
   ['#45352d','#72574a'],
   ['#1d3150','#365b82'],
   ['#3b3032','#76575c'],
+]
+
+const PALETTES = [
+  ['#171B24','#3A4454'], // graphite
+  ['#0E3B32','#1C7A63'], // emerald
+  ['#102B57','#2563A8'], // cobalt
+  ['#4A1724','#A54457'], // burgundy
+  ['#4B2F19','#A56B2D'], // bronze
+  ['#321747','#7A3E96'], // plum
 ]
 
 function App() {
@@ -135,7 +144,7 @@ function App() {
       bank: row.bank || '',
       last4: row.last4 || '',
       monthlySpendLimit: Number(row.monthly_spend_limit || 0),
-      colors: [row.color_a, row.color_b],
+      colors: normalizeCardColors(row.color_a, row.color_b),
       tip: row.tip || '',
       rewardDateBasis: row.reward_date_basis,
       rewardPrograms: programsByCard.get(row.id) || [],
@@ -1009,7 +1018,7 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
 
       return <button
         key={card.id}
-        className={`wallet-card ${card.id === selectedId ? 'selected' : ''} ${dragging ? 'dragging-card' : ''}`}
+        className={`wallet-card ${card.id === selectedId ? 'selected' : ''} ${index > 0 ? 'stacked-behind' : ''} ${dragging ? 'dragging-card' : ''}`}
         style={{
           '--stack-index': shownIndex,
           '--drag-origin-index': index,
@@ -1026,6 +1035,7 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
         <div className="card-top"><span>{card.bank || 'CARD'}</span><span>{card.last4 ? `•••• ${card.last4}` : ''}</span></div>
         <div className="card-name">{card.name}</div>
         <div className="card-bottom"><span>REWARDS</span><span>%</span></div>
+        {index > 0 && <div className="stack-peek-label"><strong>{card.name}</strong><span>{card.bank || ''}</span></div>}
       </button>
     })}
     {cards.length > 1 && <div className="wallet-reorder-hint">{drag?.active ? '放開即可完成排序' : '長按卡片後上下拖曳排序'}</div>}
@@ -1405,6 +1415,10 @@ function formatDateLong(date){
 function formatMonthLong(month){
   const [y,m] = month.split('-')
   return `${Number(y)}年${Number(m)}月`
+}
+function normalizeCardColors(colorA, colorB){
+  const index = LEGACY_PALETTES.findIndex(([a,b]) => a === colorA && b === colorB)
+  return index >= 0 ? PALETTES[index] : [colorA || PALETTES[0][0], colorB || PALETTES[0][1]]
 }
 function addDays(dateStr, days){
   const d = new Date(dateStr + 'T12:00:00')
