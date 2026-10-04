@@ -731,3 +731,28 @@ h2,h3{margin:0}
 .stack-peek-label span{
   font-size:9px;
 }
+
+/* v0.3.5: prevent accidental text selection/callout across the app UI */
+#root,
+.app-shell,
+.modal-backdrop,
+.sheet,
+button,
+label,
+.wallet-card,
+.transaction,
+.summary-card,
+.settings-action,
+.card-settings-item{
+  -webkit-user-select:none !important;
+  user-select:none !important;
+  -webkit-touch-callout:none !important;
+}
+
+/* Keep editable form fields usable for cursor movement and text editing */
+input,
+textarea{
+  -webkit-user-select:text !important;
+  user-select:text !important;
+  -webkit-touch-callout:default !important;
+}
