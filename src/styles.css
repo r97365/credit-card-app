@@ -142,3 +142,12 @@ h2,h3{margin:0}
 .swipe-delete:disabled{opacity:.65}
 .transaction.swipe-content{position:relative;z-index:1;background:#12151a;border-bottom:0;will-change:transform;transition:transform .18s cubic-bezier(.2,.8,.2,1)}
 .transaction.swipe-content:active{transition:none}
+
+.range-trigger.active-range{color:#efe3be;background:rgba(214,185,120,.08);border-radius:999px}
+.month-pill input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.month-pill{position:relative}
+.range-note{margin:-6px 0 16px;color:#777f89;font-size:11px;line-height:1.45}
+.segment-control{display:grid;grid-template-columns:1fr 1fr;gap:4px;background:#101317;border:1px solid var(--line);border-radius:14px;padding:4px;margin:12px 0 6px}
+.segment-control button{border:0;background:transparent;color:#8f96a0;padding:10px 8px;border-radius:10px;font-size:12px}
+.segment-control button.selected{background:#262b31;color:#f4f2ec}
+.range-explain{margin-top:10px;color:#7f8791;font-size:11px;line-height:1.5}
