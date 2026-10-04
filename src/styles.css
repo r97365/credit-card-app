@@ -835,3 +835,99 @@ textarea{
     linear-gradient(118deg, transparent 25%, rgba(255,255,255,.14) 47%, transparent 68%);
   pointer-events:none;
 }
+
+/* v0.4.0: offline-first sync status */
+.sync-banner{
+  width:100%;
+  border:1px solid rgba(214,185,120,.18);
+  background:rgba(214,185,120,.07);
+  color:#ece8df;
+  border-radius:15px;
+  padding:10px 12px;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;
+  gap:10px;
+  text-align:left;
+  margin:10px 0 14px;
+}
+.sync-banner.offline{
+  border-color:rgba(151,160,173,.2);
+  background:rgba(151,160,173,.07);
+}
+.sync-banner.conflict{
+  border-color:rgba(200,113,113,.3);
+  background:rgba(200,113,113,.09);
+}
+.sync-dot{
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:#d6b978;
+  box-shadow:0 0 0 4px rgba(214,185,120,.09);
+}
+.sync-banner.offline .sync-dot{background:#8f98a4;box-shadow:0 0 0 4px rgba(143,152,164,.09)}
+.sync-banner.conflict .sync-dot{background:#d98f8f;box-shadow:0 0 0 4px rgba(217,143,143,.1)}
+.sync-banner strong,.sync-banner span{display:block}
+.sync-banner strong{font-size:11px}
+.sync-banner div>span{font-size:9px;color:#8b929c;margin-top:2px}
+.sync-chevron{font-size:20px;color:#777f89}
+.sync-status-card{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  padding:14px;
+  border:1px solid var(--line);
+  background:#101317;
+  border-radius:16px;
+  margin:10px 0 14px;
+}
+.sync-status-card strong{font-size:14px}
+.sync-status-card span{font-size:11px;color:#939aa4}
+.sync-status-card small{font-size:9px;color:#69717b}
+.sync-status-card.online strong{color:#a9ccb9}
+.sync-status-card.offline strong{color:#aeb5bf}
+.conflict-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.conflict-item{
+  border:1px solid rgba(200,113,113,.22);
+  background:rgba(200,113,113,.055);
+  border-radius:15px;
+  padding:12px;
+}
+.conflict-item>div:first-child{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+.conflict-item strong{font-size:12px}
+.conflict-item span{font-size:10px;color:#8d949e}
+.conflict-actions{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:7px;
+  margin-top:10px;
+}
+.conflict-actions button{
+  border:1px solid var(--line);
+  background:#1c2026;
+  color:#b7bdc5;
+  border-radius:11px;
+  padding:9px 8px;
+  font-size:10px;
+}
+.conflict-actions button.primary-choice{
+  border-color:rgba(214,185,120,.28);
+  background:rgba(214,185,120,.1);
+  color:#ead8a5;
+}
+.conflict-actions button:disabled{opacity:.35}
+.sync-note{
+  text-align:center;
+  color:#717984;
+  font-size:10px;
+  margin-top:9px;
+}
