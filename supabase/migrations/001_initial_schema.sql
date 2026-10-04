@@ -60,12 +60,43 @@ create index if not exists idx_cards_user on public.cards(user_id);
 create index if not exists idx_rewards_card on public.reward_programs(card_id);
 create index if not exists idx_tx_user_card_date on public.transactions(user_id, card_id, transaction_date desc);
 
+-- Explicit API privileges because "Automatically expose new tables" is disabled.
+revoke all on table public.cards from anon;
+revoke all on table public.reward_programs from anon;
+revoke all on table public.transactions from anon;
+revoke all on table public.transaction_reward_exclusions from anon;
+
+grant select, insert, update, delete on table public.cards to authenticated;
+grant select, insert, update, delete on table public.reward_programs to authenticated;
+grant select, insert, update, delete on table public.transactions to authenticated;
+grant select, insert, update, delete on table public.transaction_reward_exclusions to authenticated;
+
 alter table public.cards enable row level security;
 alter table public.reward_programs enable row level security;
 alter table public.transactions enable row level security;
 alter table public.transaction_reward_exclusions enable row level security;
 
-create policy "cards_owner_all" on public.cards for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "rewards_owner_all" on public.reward_programs for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "transactions_owner_all" on public.transactions for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "tx_reward_exclusions_owner_all" on public.transaction_reward_exclusions for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "cards_owner_all" on public.cards;
+drop policy if exists "rewards_owner_all" on public.reward_programs;
+drop policy if exists "transactions_owner_all" on public.transactions;
+drop policy if exists "tx_reward_exclusions_owner_all" on public.transaction_reward_exclusions;
+
+create policy "cards_owner_all" on public.cards
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+create policy "rewards_owner_all" on public.reward_programs
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+create policy "transactions_owner_all" on public.transactions
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+create policy "tx_reward_exclusions_owner_all" on public.transaction_reward_exclusions
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
