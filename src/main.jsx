@@ -4,7 +4,7 @@ import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 
-const APP_VERSION = '0.2.5'
+const APP_VERSION = '0.2.6'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const PALETTES = [
@@ -849,7 +849,7 @@ function AddTransactionModal({ card, transactions, onClose, onSave }) {
       <SheetGrabber onClose={onClose} />
       <h3>新增刷卡</h3>
       <div className="selected-mini-card">{card.name}<span>{card.bank}</span></div>
-      <label>日期<input className="compact-date-input" type="date" value={date} onChange={e => setDate(e.target.value)} /></label>
+      <label>日期<DateField value={date} onChange={setDate} /></label>
       <label>刷卡項目<input placeholder="手動輸入，例如：加油" value={title} onChange={e => setTitle(e.target.value)} /></label>
       <label>金額
         <div className="amount-with-refund">
@@ -908,6 +908,19 @@ function RangePicker({ startDate, endDate, onClose, onApply }) {
   </div>
 }
 
+function DateField({ value, onChange, placeholder = '選擇日期' }) {
+  return <div className={`custom-date-field ${value ? '' : 'empty'}`}>
+    <span>{value ? formatDateLong(value) : placeholder}</span>
+    <span className="date-chevron">⌄</span>
+    <input
+      type="date"
+      value={value || ''}
+      onChange={e => onChange(e.target.value)}
+      aria-label={placeholder}
+    />
+  </div>
+}
+
 function TransactionEditor({ tx, cards, onClose, onSave }) {
   const currentCard = cards.find(c => c.id === tx.cardId) || cards[0]
   const [cardId,setCardId] = useState(tx.cardId)
@@ -937,7 +950,7 @@ function TransactionEditor({ tx, cards, onClose, onSave }) {
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
     <SheetGrabber onClose={onClose} /><div className="sheet-title-row"><h3>編輯刷卡紀錄</h3><button className="close-btn" onClick={onClose}>×</button></div>
     <label>信用卡<select value={cardId} onChange={e=>{setCardId(e.target.value);setProgramExclusions([])}}>{cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-    <div className="transaction-date-grid"><label>交易日<input className="compact-date-input" type="date" value={date} onChange={e=>setDate(e.target.value)} /></label><label>入帳日（選填）<input className="compact-date-input" type="date" value={postedDate} onChange={e=>setPostedDate(e.target.value)} /></label></div>
+    <div className="transaction-date-grid"><label>交易日<DateField value={date} onChange={setDate} /></label><label>入帳日（選填）<DateField value={postedDate} onChange={setPostedDate} placeholder="未設定" /></label></div>
     <label>刷卡項目<input value={title} onChange={e=>setTitle(e.target.value)} /></label>
     <label>金額
       <div className="amount-with-refund">
@@ -1112,6 +1125,10 @@ function lastDayOfMonth(month){
 function formatDateShort(date){
   const [,m,d] = date.split('-')
   return `${Number(m)}/${Number(d)}`
+}
+function formatDateLong(date){
+  const [y,m,d] = date.split('-')
+  return `${Number(y)}年${Number(m)}月${Number(d)}日`
 }
 function addDays(dateStr, days){
   const d = new Date(dateStr + 'T12:00:00')
