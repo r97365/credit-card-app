@@ -341,7 +341,7 @@ function App() {
       .sort((a,b) => a.endDate.localeCompare(b.endDate))
   }, [activeCards])
 
-  const modalOpen = showRangePicker || showAddTx || showCardEditor || showCardList || showSettings || showStats || Boolean(editingTransaction)
+  const modalOpen = showRangePicker || showAddTx || showCardEditor || showCardList || showSettings || showStats || showSyncSheet || Boolean(editingTransaction)
 
   useEffect(() => {
     if (!modalOpen) return
@@ -691,6 +691,20 @@ function App() {
     return copies.length
   }
 
+  async function handleResolveConflict(conflict, choice) {
+    if (!session?.user || !navigator.onLine) return
+    setSyncBusy(true)
+    try {
+      await resolveConflict(session.user.id, conflict, choice)
+      await refreshSyncStatus()
+      await loadData(null, { skipFlush:true })
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSyncBusy(false)
+    }
+  }
+
   async function signOut() {
     await supabase.auth.signOut()
     setShowSettings(false)
@@ -710,6 +724,14 @@ function App() {
       </header>
 
       {error && <div className="error-banner">{error}<button onClick={() => setError('')}>×</button></div>}
+      {(!online || pendingSync > 0 || syncConflicts.length > 0 || syncBusy) && <button className={`sync-banner ${!online ? 'offline' : syncConflicts.length ? 'conflict' : ''}`} onClick={() => setShowSyncSheet(true)}>
+        <span className="sync-dot" />
+        <div>
+          <strong>{!online ? '離線模式' : syncConflicts.length ? `${syncConflicts.length} 筆同步衝突` : syncBusy ? '同步中…' : `${pendingSync} 筆待同步`}</strong>
+          <span>{!online ? '你仍可使用 App；恢復網路後會自動同步。' : syncConflicts.length ? '點這裡選擇保留本機或雲端版本。' : '資料會自動同步到 Supabase。'}</span>
+        </div>
+        <span className="sync-chevron">›</span>
+      </button>}
 
       <section className="period-bar">
         <label className={`month-pill ${periodMode === 'month' ? 'active-period' : ''}`}>
@@ -868,6 +890,16 @@ function App() {
         onAddCard={() => { setShowSettings(false); setEditingCardId(null); setCreatingCard(true); setShowCardEditor(true) }}
         onRestoreCard={restoreCard}
         onSignOut={signOut}
+      />}
+      {showSyncSheet && <SyncSheet
+        online={online}
+        pending={pendingSync}
+        conflicts={syncConflicts}
+        busy={syncBusy}
+        snapshotSavedAt={snapshotSavedAt}
+        onClose={() => setShowSyncSheet(false)}
+        onSync={() => syncNow(true)}
+        onResolve={handleResolveConflict}
       />}
       {undoDelete && <div className="undo-toast"><span>已刪除「{undoDelete.tx.title}」</span><button onClick={undoTransactionDelete}>復原</button></div>}
     </div>
@@ -1585,6 +1617,38 @@ function CardListSheet({ cards, onClose, onChoose, onAdd }) {
   </div></div>
 }
 
+function SyncSheet({ online, pending, conflicts, busy, snapshotSavedAt, onClose, onSync, onResolve }) {
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
+    <SheetGrabber onClose={onClose} />
+    <div className="sheet-title-row"><h3>同步狀態</h3><button className="close-btn" onClick={onClose}>×</button></div>
+
+    <div className={`sync-status-card ${online ? 'online' : 'offline'}`}>
+      <strong>{online ? '已連線' : '目前離線'}</strong>
+      <span>{online ? (pending ? `${pending} 筆變更等待同步` : '所有變更都已同步') : '變更會先安全存放在這台裝置。'}</span>
+      {snapshotSavedAt && <small>本機快取：{formatSyncTime(snapshotSavedAt)}</small>}
+    </div>
+
+    {conflicts.length > 0 && <>
+      <div className="field-label">需要你決定的同步衝突</div>
+      <div className="conflict-list">
+        {conflicts.map(conflict => <div className="conflict-item" key={conflict.id}>
+          <div>
+            <strong>{syncEntityLabel(conflict.entity)}</strong>
+            <span>這筆資料在另一台裝置也被修改過。</span>
+          </div>
+          <div className="conflict-actions">
+            <button disabled={!online || busy} onClick={() => onResolve(conflict, 'remote')}>採用雲端</button>
+            <button disabled={!online || busy} className="primary-choice" onClick={() => onResolve(conflict, 'local')}>保留本機</button>
+          </div>
+        </div>)}
+      </div>
+    </>}
+
+    <button className="primary-btn" disabled={!online || busy} onClick={onSync}>{busy ? '同步中…' : '立即同步'}</button>
+    {!online && <div className="sync-note">恢復網路後，App 會在回到前景時自動重試。</div>}
+  </div></div>
+}
+
 function StatsSheet({ cards, transactions, month, onClose }) {
   const rows = cards.map(card => {
     const s = calculateCardSummary(card, transactions, month)
@@ -1620,9 +1684,117 @@ function fromProgramRow(p) {
   return {
     id:p.id, name:p.name, rate:Number(p.rate), rewardCap:p.reward_cap == null ? null : Number(p.reward_cap),
     spendCap:p.spend_cap == null ? null : Number(p.spend_cap), calcMode:p.calc_mode, rounding:p.rounding,
-    startDate:p.start_date, endDate:p.end_date,
+    startDate:p.start_date, endDate:p.end_date, updatedAt:p.updated_at,
   }
 }
+function toTransactionRow(tx, userId){
+  return {
+    id:tx.id,
+    user_id:userId,
+    card_id:tx.cardId,
+    transaction_date:tx.date,
+    posted_date:tx.postedDate || null,
+    title:tx.title,
+    amount:Number(tx.amount),
+    excluded:Boolean(tx.excluded),
+    reconciled:Boolean(tx.reconciled),
+    updated_at:tx.updatedAt || new Date().toISOString(),
+  }
+}
+
+function toCardRow(card, userId){
+  return {
+    id:card.id,
+    user_id:userId,
+    name:card.name,
+    bank:card.bank || null,
+    last4:card.last4 || null,
+    color_a:card.colors?.[0] || PALETTES[0][0],
+    color_b:card.colors?.[1] || PALETTES[0][1],
+    monthly_spend_limit:card.monthlySpendLimit || null,
+    tip:card.tip || null,
+    reward_date_basis:card.rewardDateBasis || 'transaction',
+    sort_order:Number(card.sortOrder || 0),
+    updated_at:card.updatedAt || new Date().toISOString(),
+  }
+}
+
+function toProgramRow(program, cardId, userId){
+  return {
+    id:program.id,
+    user_id:userId,
+    card_id:cardId,
+    name:program.name,
+    rate:Number(program.rate || 0),
+    reward_cap:program.rewardCap == null ? null : Number(program.rewardCap),
+    spend_cap:program.spendCap == null ? null : Number(program.spendCap),
+    calc_mode:program.calcMode || 'monthly_total',
+    rounding:program.rounding || 'floor',
+    start_date:program.startDate || null,
+    end_date:program.endDate || null,
+    updated_at:program.updatedAt || new Date().toISOString(),
+  }
+}
+
+function mergeCardsWithLocalPending(remoteCards, localCards, queue){
+  const map = new Map(remoteCards.map(card => [card.id, card]))
+  const localMap = new Map(localCards.map(card => [card.id, card]))
+
+  for (const mutation of queue.filter(item => item.entity === 'card')) {
+    if (mutation.op === 'delete') map.delete(mutation.recordId)
+    else if (localMap.has(mutation.recordId)) map.set(mutation.recordId, localMap.get(mutation.recordId))
+  }
+
+  for (const mutation of queue.filter(item => item.entity === 'program')) {
+    for (const [cardId, card] of map.entries()) {
+      const localCard = localMap.get(cardId)
+      if (mutation.op === 'delete') {
+        map.set(cardId, { ...card, rewardPrograms:(card.rewardPrograms || []).filter(p => p.id !== mutation.recordId) })
+        continue
+      }
+
+      const localProgram = localCard?.rewardPrograms?.find(p => p.id === mutation.recordId)
+      if (!localProgram) continue
+      const current = card.rewardPrograms || []
+      map.set(cardId, {
+        ...card,
+        rewardPrograms:current.some(p => p.id === mutation.recordId)
+          ? current.map(p => p.id === mutation.recordId ? localProgram : p)
+          : [...current, localProgram],
+      })
+    }
+  }
+
+  return [...map.values()].sort((a,b) => (a.archived === b.archived ? a.sortOrder - b.sortOrder : a.archived ? 1 : -1))
+}
+
+function mergeTransactionsWithLocalPending(remoteTx, localTx, queue){
+  const map = new Map(remoteTx.map(tx => [tx.id, tx]))
+  const localMap = new Map(localTx.map(tx => [tx.id, tx]))
+
+  for (const mutation of queue.filter(item => item.entity === 'transaction')) {
+    if (mutation.op === 'delete') map.delete(mutation.recordId)
+    else if (localMap.has(mutation.recordId)) map.set(mutation.recordId, localMap.get(mutation.recordId))
+  }
+
+  return [...map.values()].sort((a,b) => b.date.localeCompare(a.date))
+}
+
+function syncEntityLabel(entity){
+  if (entity === 'transaction') return '刷卡紀錄'
+  if (entity === 'card') return '信用卡設定'
+  if (entity === 'program') return '回饋活動'
+  return '資料'
+}
+
+function formatSyncTime(value){
+  try {
+    return new Intl.DateTimeFormat('zh-TW', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' }).format(new Date(value))
+  } catch {
+    return '已儲存'
+  }
+}
+
 function localToday(){ const d=new Date(); const off=d.getTimezoneOffset(); return new Date(d.getTime()-off*60000).toISOString().slice(0,10) }
 function localMonth(){ return localToday().slice(0,7) }
 function lastDayOfMonth(month){
