@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
-import { calculateCardSummary, formatMoney, formatPct } from './rewardEngine'
+import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 
 const PALETTES = [
@@ -19,6 +19,10 @@ function App() {
   const [transactions, setTransactions] = useState([])
   const [selectedCardId, setSelectedCardId] = useState(null)
   const [month, setMonth] = useState(localMonth())
+  const [periodMode, setPeriodMode] = useState('month')
+  const [rangeStart, setRangeStart] = useState(`${localMonth()}-01`)
+  const [rangeEnd, setRangeEnd] = useState(lastDayOfMonth(localMonth()))
+  const [showRangePicker, setShowRangePicker] = useState(false)
   const [showTip, setShowTip] = useState(false)
   const [showAddTx, setShowAddTx] = useState(false)
   const [showCardEditor, setShowCardEditor] = useState(false)
@@ -109,9 +113,20 @@ function App() {
 
   const selectedCard = cards.find(c => c.id === selectedCardId) || null
   const summary = useMemo(
-    () => selectedCard ? calculateCardSummary(selectedCard, transactions, month) : null,
-    [selectedCard, transactions, month]
+    () => selectedCard
+      ? (periodMode === 'month'
+          ? calculateCardSummary(selectedCard, transactions, month)
+          : calculateCardSummaryRange(selectedCard, transactions, rangeStart, rangeEnd))
+      : null,
+    [selectedCard, transactions, month, periodMode, rangeStart, rangeEnd]
   )
+
+  const visibleTransactions = useMemo(() => transactions.filter(t =>
+    t.cardId === selectedCardId &&
+    (periodMode === 'month'
+      ? t.date.startsWith(month)
+      : t.date >= rangeStart && t.date <= rangeEnd)
+  ), [transactions, selectedCardId, periodMode, month, rangeStart, rangeEnd])
 
   async function addTransaction(tx) {
     const { data, error: insertError } = await supabase.from('transactions').insert({
@@ -231,11 +246,13 @@ function App() {
       {error && <div className="error-banner">{error}<button onClick={() => setError('')}>×</button></div>}
 
       <section className="period-bar">
-        <label className="month-pill">
+        <label className={`month-pill ${periodMode === 'month' ? 'active-period' : ''}`}>
           <span>{month.replace('-', ' / ')}</span>
-          <input type="month" value={month} onChange={e => setMonth(e.target.value)} />
+          <input type="month" value={month} onChange={e => { setMonth(e.target.value); setPeriodMode('month') }} />
         </label>
-        <button className="ghost-btn" onClick={() => alert('自訂區間下一版接上；目前回饋上限先依月份計算。')}>自訂區間</button>
+        <button className={`ghost-btn range-trigger ${periodMode === 'range' ? 'active-range' : ''}`} onClick={() => setShowRangePicker(true)}>
+          {periodMode === 'range' ? `${formatDateShort(rangeStart)}–${formatDateShort(rangeEnd)}` : '自訂區間'}
+        </button>
       </section>
 
       {loadingData ? <CenteredState compact title="同步資料中…" /> : !selectedCard ? (
@@ -251,10 +268,14 @@ function App() {
                   <h2>{selectedCard.name}</h2>
                   <button className="tip-button" onClick={() => setShowTip(v => !v)} aria-label="顯示提示">ⓘ</button>
                 </div>
-                <div className="muted">本月刷卡</div>
+                <div className="muted">{periodMode === 'month' ? '本月刷卡' : '區間刷卡'}</div>
               </div>
-              <div className={`status-badge ${summary.limitRatio >= 1 ? 'danger' : summary.limitRatio >= .85 ? 'warn' : ''}`}>
-                {selectedCard.monthlySpendLimit ? (summary.limitRatio >= 1 ? '已超額' : `${Math.round(summary.limitRatio * 100)}%`) : '未設上限'}
+              <div className={`status-badge ${periodMode === 'month' && summary.limitRatio >= 1 ? 'danger' : periodMode === 'month' && summary.limitRatio >= .85 ? 'warn' : ''}`}>
+                {periodMode === 'range'
+                  ? '自訂區間'
+                  : selectedCard.monthlySpendLimit
+                    ? (summary.limitRatio >= 1 ? '已超額' : `${Math.round(summary.limitRatio * 100)}%`)
+                    : '未設上限'}
               </div>
             </div>
 
@@ -262,9 +283,14 @@ function App() {
 
             <div className="spend-row">
               <strong>{formatMoney(summary.totalSpend)}</strong>
-              <span>{selectedCard.monthlySpendLimit ? `/ ${formatMoney(selectedCard.monthlySpendLimit)}` : '無刷卡上限'}</span>
+              <span>{periodMode === 'range'
+                ? `${formatDateShort(rangeStart)}–${formatDateShort(rangeEnd)}`
+                : selectedCard.monthlySpendLimit
+                  ? `/ ${formatMoney(selectedCard.monthlySpendLimit)}`
+                  : '無刷卡上限'}</span>
             </div>
-            <div className="progress"><div style={{ width: `${selectedCard.monthlySpendLimit ? Math.min(100, summary.limitRatio * 100) : 0}%` }} /></div>
+            {periodMode === 'month' && <div className="progress"><div style={{ width: `${selectedCard.monthlySpendLimit ? Math.min(100, summary.limitRatio * 100) : 0}%` }} /></div>}
+            {periodMode === 'range' && <div className="range-note">跨月份時，各月份的回饋上限會分開計算後再加總。</div>}
 
             <div className="reward-hero">
               <div><span>預估總回饋</span><strong>{formatMoney(summary.totalReward)}</strong></div>
@@ -280,7 +306,9 @@ function App() {
                   </div>
                   <div className="program-value">
                     <strong>{formatMoney(p.reward)}</strong>
-                    <span>{p.rewardCap == null ? (p.spendCap == null ? '無上限' : `消費上限 ${formatMoney(p.spendCap)}`) : `/ ${formatMoney(p.rewardCap)}`}</span>
+                    <span>{p.rewardCap == null
+                      ? (p.spendCap == null ? '無上限' : `${periodMode === 'range' ? '月' : ''}消費上限 ${formatMoney(p.spendCap)}`)
+                      : (periodMode === 'range' ? `月回饋上限 ${formatMoney(p.rewardCap)}` : `/ ${formatMoney(p.rewardCap)}`)}</span>
                     {p.capped && <span className="done">✓</span>}
                   </div>
                 </div>
@@ -296,10 +324,10 @@ function App() {
           <section className="transactions-section">
             <div className="section-head">
               <h3>最近紀錄</h3>
-              <span className="record-count">{transactions.filter(t => t.cardId === selectedCardId && t.date.startsWith(month)).length} 筆</span>
+              <span className="record-count">{visibleTransactions.length} 筆</span>
             </div>
             <div className="transaction-list">
-              {transactions.filter(t => t.cardId === selectedCardId && t.date.startsWith(month)).slice(0,8).map(tx => (
+              {visibleTransactions.slice(0,8).map(tx => (
                 <SwipeTransaction
                   key={tx.id}
                   tx={tx}
@@ -307,7 +335,7 @@ function App() {
                   onDelete={() => deleteTransaction(tx.id)}
                 />
               ))}
-              {!transactions.some(t => t.cardId === selectedCardId && t.date.startsWith(month)) && <div className="empty-list">這個月還沒有刷卡紀錄</div>}
+              {!visibleTransactions.length && <div className="empty-list">{periodMode === 'month' ? '這個月還沒有刷卡紀錄' : '這個區間還沒有刷卡紀錄'}</div>}
             </div>
           </section>
         </>
@@ -319,7 +347,18 @@ function App() {
         <button className="nav-item" onClick={() => selectedCard && setShowCardEditor(true)}><span>⚙</span><small>卡片設定</small></button>
       </nav>
 
-      {showAddTx && selectedCard && <AddTransactionModal card={selectedCard} month={month} transactions={transactions} onClose={() => setShowAddTx(false)} onSave={addTransaction} />}
+      {showAddTx && selectedCard && <AddTransactionModal card={selectedCard} transactions={transactions} onClose={() => setShowAddTx(false)} onSave={addTransaction} />}
+      {showRangePicker && <RangePicker
+        startDate={rangeStart}
+        endDate={rangeEnd}
+        onClose={() => setShowRangePicker(false)}
+        onApply={(start, end) => {
+          setRangeStart(start)
+          setRangeEnd(end)
+          setPeriodMode('range')
+          setShowRangePicker(false)
+        }}
+      />}
       {showCardEditor && <CardEditor card={selectedCard} onClose={() => setShowCardEditor(false)} onSaveCard={saveCard} onSaveProgram={saveProgram} onDeleteProgram={deleteProgram} />}
       {showSettings && <AccountSheet email={session.user.email} onClose={() => setShowSettings(false)} onAddCard={() => { setShowSettings(false); setSelectedCardId(null); setShowCardEditor(true) }} onSignOut={signOut} />}
     </div>
@@ -475,17 +514,18 @@ function CardStack({ cards, selectedId, onSelect }) {
   </section>
 }
 
-function AddTransactionModal({ card, month, transactions, onClose, onSave }) {
+function AddTransactionModal({ card, transactions, onClose, onSave }) {
   const [date, setDate] = useState(localToday())
   const [title, setTitle] = useState('')
   const [amount, setAmount] = useState('')
   const [busy, setBusy] = useState(false)
-  const baseSummary = useMemo(() => calculateCardSummary(card, transactions, month), [card, transactions, month])
+  const previewMonth = date.slice(0,7)
+  const baseSummary = useMemo(() => calculateCardSummary(card, transactions, previewMonth), [card, transactions, previewMonth])
   const projected = useMemo(() => {
-    if (!Number(amount) || !date.startsWith(month)) return null
+    if (!Number(amount)) return null
     const fake = { id:'preview', cardId:card.id, date, title:title || 'preview', amount:Number(amount), excluded:false, programExclusions:[] }
-    return calculateCardSummary(card, [fake, ...transactions], month)
-  }, [amount, date, title, card, transactions, month])
+    return calculateCardSummary(card, [fake, ...transactions], previewMonth)
+  }, [amount, date, title, card, transactions, previewMonth])
 
   const capWarnings = useMemo(() => {
     if (!projected) return []
@@ -518,6 +558,49 @@ function AddTransactionModal({ card, month, transactions, onClose, onSave }) {
       {projected && <div className="reward-preview"><span>新增後本月預估總回饋</span><strong>{formatMoney(projected.totalReward)} · {formatPct(projected.effectiveRate)}</strong></div>}
       {capWarnings.map(w => <div className="cap-warning" key={w.name}><strong>{w.name}｜{w.rate}% 將達上限</strong><div>本筆約前 {formatMoney(w.eligible)} 仍可取得此活動回饋，剩餘 {formatMoney(w.excess)} 超過該活動上限；其他活動仍會各自計算。</div></div>)}
       <button className="primary-btn" disabled={busy || !title.trim() || !Number(amount)} onClick={save}>{busy ? '儲存中…' : '新增'}</button>
+    </div>
+  </div>
+}
+
+function RangePicker({ startDate, endDate, onClose, onApply }) {
+  const [mode, setMode] = useState('date')
+  const [start, setStart] = useState(startDate)
+  const [end, setEnd] = useState(endDate)
+  const [startMonth, setStartMonth] = useState(startDate.slice(0,7))
+  const [endMonth, setEndMonth] = useState(endDate.slice(0,7))
+
+  function apply() {
+    let s = start
+    let e = end
+    if (mode === 'month') {
+      s = `${startMonth}-01`
+      e = lastDayOfMonth(endMonth)
+    }
+    if (!s || !e) return
+    if (s > e) {
+      alert('開始日期不能晚於結束日期。')
+      return
+    }
+    onApply(s, e)
+  }
+
+  return <div className="modal-backdrop" onMouseDown={onClose}>
+    <div className="sheet" onMouseDown={e => e.stopPropagation()}>
+      <div className="sheet-grabber" />
+      <div className="sheet-title-row"><h3>自訂區間</h3><button className="close-btn" onClick={onClose}>×</button></div>
+      <div className="segment-control">
+        <button className={mode === 'date' ? 'selected' : ''} onClick={() => setMode('date')}>自訂日期</button>
+        <button className={mode === 'month' ? 'selected' : ''} onClick={() => setMode('month')}>月份區間</button>
+      </div>
+      {mode === 'date' ? <div className="two-col">
+        <label>開始日期<input type="date" value={start} onChange={e => setStart(e.target.value)} /></label>
+        <label>結束日期<input type="date" value={end} onChange={e => setEnd(e.target.value)} /></label>
+      </div> : <div className="two-col">
+        <label>起始月份<input type="month" value={startMonth} onChange={e => setStartMonth(e.target.value)} /></label>
+        <label>結束月份<input type="month" value={endMonth} onChange={e => setEndMonth(e.target.value)} /></label>
+      </div>}
+      <div className="range-explain">區間跨越多個月份時，每個月份會各自套用該月的回饋活動與上限，再將結果加總。</div>
+      <button className="primary-btn" onClick={apply}>套用區間</button>
     </div>
   </div>
 }
@@ -622,5 +705,14 @@ function fromProgramRow(p) {
 }
 function localToday(){ const d=new Date(); const off=d.getTimezoneOffset(); return new Date(d.getTime()-off*60000).toISOString().slice(0,10) }
 function localMonth(){ return localToday().slice(0,7) }
+function lastDayOfMonth(month){
+  const [year, mon] = month.split('-').map(Number)
+  const d = new Date(year, mon, 0)
+  return `${year}-${String(mon).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+}
+function formatDateShort(date){
+  const [,m,d] = date.split('-')
+  return `${Number(m)}/${Number(d)}`
+}
 
 createRoot(document.getElementById('root')).render(<App />)
