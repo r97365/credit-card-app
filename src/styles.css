@@ -181,3 +181,20 @@ h2,h3{margin:0}
 .archived-list{display:flex;flex-direction:column;gap:7px}.archived-card{display:flex;align-items:center;justify-content:space-between;background:#101317;border:1px solid var(--line);border-radius:13px;padding:10px 11px}.archived-card span{color:#9fa6af;font-size:12px}.archived-card button{border:0;background:#252a31;color:#d8dce1;border-radius:9px;padding:7px 9px;font-size:10px}
 .sheet-grabber-zone{height:28px;display:flex;justify-content:center;align-items:flex-start;touch-action:none;margin:-4px 0 0}
 .sheet-grabber-zone .sheet-grabber{margin:5px auto 0;transition:transform .08s linear}
+
+/* Mobile stability + no Safari focus zoom */
+@media (max-width: 600px){
+  .auth-card input,.sheet input,.sheet select,.sheet textarea{font-size:16px}
+  .transaction-date-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+  .transaction-date-grid label{min-width:0}
+  .transaction-date-grid input{min-width:0;width:100%;padding-left:10px;padding-right:10px}
+}
+.amount-with-refund{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;margin-top:7px}
+.amount-with-refund input{margin-top:0}
+.refund-chip{border:1px solid rgba(200,113,113,.28);background:rgba(200,113,113,.08);color:#d99a9a;border-radius:11px;padding:10px 11px;font-size:11px;font-weight:700}
+.refund-chip.active{background:#9f3f45;color:#fff;border-color:#b44b53;box-shadow:0 0 0 2px rgba(180,75,83,.12)}
+.swipe-reconcile.undo-reconcile{background:linear-gradient(135deg,#5a5f68,#777e88)}
+.wallet-reorder-hint{position:absolute;left:0;right:0;bottom:-1px;text-align:center;color:#676f79;font-size:10px;pointer-events:none}
+.wallet-stack.reordering .wallet-card{transition:none}
+.wallet-card.dragging-card{transform:translateY(calc(var(--stack-index) * 38px + var(--drag-y))) scale(1.015);z-index:30;box-shadow:0 28px 70px rgba(0,0,0,.48);touch-action:none}
+.wallet-card{touch-action:pan-y;-webkit-user-select:none;user-select:none}
