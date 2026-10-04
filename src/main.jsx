@@ -149,6 +149,16 @@ function App() {
     setTransactions(prev => prev.map(item => item.id === txId ? { ...item, excluded: !item.excluded } : item))
   }
 
+  async function deleteTransaction(txId) {
+    const { error: deleteError } = await supabase.from('transactions').delete().eq('id', txId)
+    if (deleteError) {
+      setError(deleteError.message)
+      return false
+    }
+    setTransactions(prev => prev.filter(item => item.id !== txId))
+    return true
+  }
+
   async function saveCard(payload) {
     const base = {
       user_id: session.user.id,
@@ -265,7 +275,7 @@ function App() {
               {summary.programs.length ? summary.programs.map(p => (
                 <div className="program-row" key={p.id}>
                   <div className="program-main">
-                    <span className="program-name">{p.name.slice(0,2)}</span>
+                    <span className="program-name" title={p.name}>{p.name}</span>
                     <span className="program-rate">{p.rate}%</span>
                   </div>
                   <div className="program-value">
@@ -290,13 +300,12 @@ function App() {
             </div>
             <div className="transaction-list">
               {transactions.filter(t => t.cardId === selectedCardId && t.date.startsWith(month)).slice(0,8).map(tx => (
-                <div className={`transaction ${tx.excluded ? 'excluded' : ''}`} key={tx.id}>
-                  <div><strong>{tx.title}</strong><span>{tx.date.slice(5).replace('-', '/')} {tx.excluded ? ' · 不計回饋' : ''}</span></div>
-                  <div className="tx-right">
-                    <strong>{formatMoney(tx.amount)}</strong>
-                    <button className="mini-btn" onClick={() => toggleExcluded(tx.id)}>{tx.excluded ? '恢復回饋' : '排除回饋'}</button>
-                  </div>
-                </div>
+                <SwipeTransaction
+                  key={tx.id}
+                  tx={tx}
+                  onToggleExcluded={() => toggleExcluded(tx.id)}
+                  onDelete={() => deleteTransaction(tx.id)}
+                />
               ))}
               {!transactions.some(t => t.cardId === selectedCardId && t.date.startsWith(month)) && <div className="empty-list">這個月還沒有刷卡紀錄</div>}
             </div>
@@ -384,6 +393,62 @@ function EyeIcon({ open }) {
   return open
     ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 10.7a2 2 0 002.7 2.7M9.9 4.2A10.8 10.8 0 0112 4c5.5 0 9 5 9 5a17 17 0 01-2.5 3M6.6 6.6C4.2 8.2 3 10 3 10s3.5 5 9 5c1.4 0 2.7-.3 3.8-.8" /></svg>
     : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.5-5 9-5 9 5 9 5-3.5 5-9 5-9-5-9-5z"/><circle cx="12" cy="12" r="2.5"/></svg>
+}
+
+function SwipeTransaction({ tx, onToggleExcluded, onDelete }) {
+  const [offset, setOffset] = useState(0)
+  const [touchStart, setTouchStart] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+  const revealWidth = 86
+
+  function handleTouchStart(e) {
+    const t = e.touches[0]
+    setTouchStart({ x: t.clientX, y: t.clientY, base: offset })
+  }
+
+  function handleTouchMove(e) {
+    if (!touchStart) return
+    const t = e.touches[0]
+    const dx = t.clientX - touchStart.x
+    const dy = t.clientY - touchStart.y
+    if (Math.abs(dx) <= Math.abs(dy)) return
+    const next = Math.max(-revealWidth, Math.min(0, touchStart.base + dx))
+    setOffset(next)
+  }
+
+  function handleTouchEnd() {
+    setOffset(offset < -34 ? -revealWidth : 0)
+    setTouchStart(null)
+  }
+
+  async function remove() {
+    if (deleting) return
+    setDeleting(true)
+    const ok = await onDelete()
+    if (!ok) {
+      setDeleting(false)
+      setOffset(0)
+    }
+  }
+
+  return <div className="swipe-row">
+    <button className="swipe-delete" onClick={remove} disabled={deleting}>{deleting ? '刪除中' : '刪除'}</button>
+    <div
+      className={`transaction swipe-content ${tx.excluded ? 'excluded' : ''}`}
+      style={{ transform: `translateX(${offset}px)` }}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
+      onClick={() => offset < 0 && setOffset(0)}
+    >
+      <div><strong>{tx.title}</strong><span>{tx.date.slice(5).replace('-', '/')} {tx.excluded ? ' · 不計回饋' : ''}</span></div>
+      <div className="tx-right">
+        <strong>{formatMoney(tx.amount)}</strong>
+        <button className="mini-btn" onClick={(e) => { e.stopPropagation(); onToggleExcluded() }}>{tx.excluded ? '恢復回饋' : '排除回饋'}</button>
+      </div>
+    </div>
+  </div>
 }
 
 function EmptyCards({ onAdd }) {
