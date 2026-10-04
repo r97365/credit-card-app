@@ -47,18 +47,41 @@ async function applyMutation(mutation, { force = false } = {}) {
 
   const payload = {
     ...mutation.payload,
-    updated_at: mutation.entity === 'exclusion' ? undefined : new Date().toISOString(),
+    updated_at: mutation.entity === 'exclusion'
+      ? undefined
+      : (mutation.payload?.updated_at || new Date().toISOString()),
   }
   if (payload.updated_at === undefined) delete payload.updated_at
 
+  const exclusions = mutation.programExclusions
   if (mutation.op === 'create') {
     const { error } = await supabase.from(table).insert(payload)
     if (error) throw error
-    return { ok:true }
+  } else {
+    const { error } = await supabase.from(table).update(payload).eq('id', mutation.recordId)
+    if (error) throw error
   }
 
-  const { error } = await supabase.from(table).update(payload).eq('id', mutation.recordId)
-  if (error) throw error
+  if (mutation.entity === 'transaction' && Array.isArray(exclusions)) {
+    const { error: clearError } = await supabase
+      .from('transaction_reward_exclusions')
+      .delete()
+      .eq('transaction_id', mutation.recordId)
+    if (clearError) throw clearError
+
+    if (exclusions.length) {
+      const rows = exclusions.map(rewardProgramId => ({
+        user_id: mutation.userId,
+        transaction_id: mutation.recordId,
+        reward_program_id: rewardProgramId,
+      }))
+      const { error: exclusionError } = await supabase
+        .from('transaction_reward_exclusions')
+        .insert(rows)
+      if (exclusionError) throw exclusionError
+    }
+  }
+
   return { ok:true }
 }
 
