@@ -333,7 +333,13 @@ function AuthScreen({ configError }) {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) setMessage(error.message)
     } else {
-      const { data, error } = await supabase.auth.signUp({ email, password })
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: 'https://r97365.github.io/credit-card-app/'
+        }
+      })
       if (error) setMessage(error.message)
       else if (!data.session) setMessage('註冊完成。Supabase 已寄驗證信到你的 Email，驗證後再回來登入。')
     }
