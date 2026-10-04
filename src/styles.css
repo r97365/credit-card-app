@@ -582,3 +582,83 @@ h2,h3{margin:0}
   color:#7f8791;
   font-weight:500;
 }
+
+/* v0.3.2: generalized safe paired date/month controls */
+.range-month-grid{
+  display:grid !important;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
+  gap:10px !important;
+}
+.range-month-grid label{
+  min-width:0 !important;
+  width:100% !important;
+}
+.range-month-grid .custom-date-field{
+  width:100% !important;
+}
+.custom-month-field input[type="month"]{
+  position:absolute !important;
+  inset:0 !important;
+  width:100% !important;
+  height:100% !important;
+  min-width:0 !important;
+  max-width:none !important;
+  margin:0 !important;
+  padding:0 !important;
+  opacity:0 !important;
+  border:0 !important;
+  background:transparent !important;
+  cursor:pointer;
+  font-size:16px !important;
+}
+
+/* Card settings list */
+.card-settings-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-top:10px;
+}
+.card-settings-item{
+  width:100%;
+  display:grid;
+  grid-template-columns:48px minmax(0,1fr) auto;
+  align-items:center;
+  gap:11px;
+  border:1px solid var(--line);
+  background:#101317;
+  color:#f4f2ed;
+  border-radius:15px;
+  padding:10px 11px;
+  text-align:left;
+}
+.card-settings-swatch{
+  width:48px;
+  height:32px;
+  border-radius:9px;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);
+}
+.card-settings-copy{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+.card-settings-copy strong{
+  font-size:13px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.card-settings-copy span{
+  color:#7f8791;
+  font-size:10px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.card-settings-chevron{
+  color:#6f7781;
+  font-size:24px;
+  line-height:1;
+}
