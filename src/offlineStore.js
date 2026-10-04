@@ -85,6 +85,7 @@ export async function queueMutation(userId, mutation) {
     const create = same.find(item => item.op === 'create')
     if (create) {
       create.payload = next.payload
+      if ('programExclusions' in next) create.programExclusions = next.programExclusions
       create.updatedAt = new Date().toISOString()
       store.put(create)
       for (const item of same) {
