@@ -248,3 +248,21 @@ h2,h3{margin:0}
     line-height:46px !important;
   }
 }
+
+/* v0.2.4: keep iOS date fields compact instead of stretching across the sheet */
+.compact-date-input{
+  width:210px !important;
+  max-width:100% !important;
+  min-width:0 !important;
+  display:block !important;
+}
+.transaction-date-grid .compact-date-input{
+  width:210px !important;
+  max-width:100% !important;
+}
+@media (max-width:600px){
+  .compact-date-input{
+    width:205px !important;
+    max-width:100% !important;
+  }
+}
