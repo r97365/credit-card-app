@@ -4,7 +4,8 @@ import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 
-const APP_VERSION = '0.2.1'
+const APP_VERSION = '0.2.2'
+const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const PALETTES = [
   ['#222831','#38414d'],
@@ -35,6 +36,45 @@ function App() {
   const [undoDelete, setUndoDelete] = useState(null)
   const [loadingData, setLoadingData] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    let stopped = false
+
+    async function checkForUpdate() {
+      try {
+        const res = await fetch(`${import.meta.env.BASE_URL}version.json?t=${Date.now()}`, { cache:'no-store' })
+        if (!res.ok) return
+        const remote = await res.json()
+        if (stopped || !remote.build || remote.build === BUILD_ID) return
+
+        const lastReload = sessionStorage.getItem('card-rewards-reload-build')
+        if (lastReload === remote.build) return
+        sessionStorage.setItem('card-rewards-reload-build', remote.build)
+
+        const next = new URL(window.location.href)
+        next.searchParams.set('_v', String(remote.build).slice(0,10))
+        window.location.replace(next.toString())
+      } catch {
+        // Update checks are best-effort; the app should keep working offline/with transient network errors.
+      }
+    }
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') checkForUpdate()
+    }
+
+    checkForUpdate()
+    window.addEventListener('focus', checkForUpdate)
+    document.addEventListener('visibilitychange', onVisible)
+    const timer = window.setInterval(checkForUpdate, 60000)
+
+    return () => {
+      stopped = true
+      window.removeEventListener('focus', checkForUpdate)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.clearInterval(timer)
+    }
+  }, [])
 
   useEffect(() => {
     if (!supabase) {
