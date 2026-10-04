@@ -27,6 +27,9 @@ function App() {
   const [showAddTx, setShowAddTx] = useState(false)
   const [showCardEditor, setShowCardEditor] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showStats, setShowStats] = useState(false)
+  const [editingTransaction, setEditingTransaction] = useState(null)
+  const [undoDelete, setUndoDelete] = useState(null)
   const [loadingData, setLoadingData] = useState(false)
   const [error, setError] = useState('')
 
@@ -91,7 +94,9 @@ function App() {
       tip: row.tip || '',
       rewardDateBasis: row.reward_date_basis,
       rewardPrograms: programsByCard.get(row.id) || [],
-    }))
+      sortOrder: Number(row.sort_order || 0),
+      archived: Number(row.sort_order || 0) < 0,
+    })).sort((a,b) => (a.archived === b.archived ? a.sortOrder - b.sortOrder : a.archived ? 1 : -1))
 
     const nextTx = (txRes.data || []).map(row => ({
       id: row.id,
@@ -107,11 +112,13 @@ function App() {
 
     setCards(nextCards)
     setTransactions(nextTx)
-    setSelectedCardId(prev => nextCards.some(c => c.id === prev) ? prev : nextCards[0]?.id || null)
+    const activeCards = nextCards.filter(c => !c.archived)
+    setSelectedCardId(prev => activeCards.some(c => c.id === prev) ? prev : activeCards[0]?.id || null)
     setLoadingData(false)
   }
 
-  const selectedCard = cards.find(c => c.id === selectedCardId) || null
+  const activeCards = cards.filter(c => !c.archived)
+  const selectedCard = activeCards.find(c => c.id === selectedCardId) || null
   const summary = useMemo(
     () => selectedCard
       ? (periodMode === 'month'
@@ -127,6 +134,15 @@ function App() {
       ? t.date.startsWith(month)
       : t.date >= rangeStart && t.date <= rangeEnd)
   ), [transactions, selectedCardId, periodMode, month, rangeStart, rangeEnd])
+
+  const expiringPrograms = useMemo(() => {
+    const today = localToday()
+    const inTenDays = addDays(today, 10)
+    return activeCards.flatMap(card => card.rewardPrograms
+      .filter(p => p.endDate && p.endDate >= today && p.endDate <= inTenDays)
+      .map(p => ({ ...p, cardName:card.name })))
+      .sort((a,b) => a.endDate.localeCompare(b.endDate))
+  }, [activeCards])
 
   async function addTransaction(tx) {
     const { data, error: insertError } = await supabase.from('transactions').insert({
@@ -164,14 +180,68 @@ function App() {
     setTransactions(prev => prev.map(item => item.id === txId ? { ...item, excluded: !item.excluded } : item))
   }
 
-  async function deleteTransaction(txId) {
-    const { error: deleteError } = await supabase.from('transactions').delete().eq('id', txId)
-    if (deleteError) {
-      setError(deleteError.message)
+  async function toggleReconciled(txId, forceValue) {
+    const tx = transactions.find(t => t.id === txId)
+    if (!tx) return false
+    const next = typeof forceValue === 'boolean' ? forceValue : !tx.reconciled
+    const { error: updateError } = await supabase.from('transactions').update({ reconciled: next }).eq('id', txId)
+    if (updateError) {
+      setError(updateError.message)
       return false
     }
-    setTransactions(prev => prev.filter(item => item.id !== txId))
+    setTransactions(prev => prev.map(item => item.id === txId ? { ...item, reconciled: next } : item))
     return true
+  }
+
+  async function saveTransactionEdits(payload) {
+    const { error: updateError } = await supabase.from('transactions').update({
+      card_id: payload.cardId,
+      transaction_date: payload.date,
+      posted_date: payload.postedDate || null,
+      title: payload.title.trim(),
+      amount: Number(payload.amount),
+      excluded: payload.excluded,
+      reconciled: payload.reconciled,
+    }).eq('id', payload.id)
+    if (updateError) throw updateError
+
+    const { error: clearError } = await supabase.from('transaction_reward_exclusions').delete().eq('transaction_id', payload.id)
+    if (clearError) throw clearError
+    if (payload.programExclusions?.length) {
+      const rows = payload.programExclusions.map(rewardProgramId => ({
+        user_id: session.user.id,
+        transaction_id: payload.id,
+        reward_program_id: rewardProgramId,
+      }))
+      const { error: exclusionError } = await supabase.from('transaction_reward_exclusions').insert(rows)
+      if (exclusionError) throw exclusionError
+    }
+    setEditingTransaction(null)
+    await loadData()
+  }
+
+  async function deleteTransaction(txId) {
+    const tx = transactions.find(item => item.id === txId)
+    if (!tx) return false
+    if (undoDelete?.timer) clearTimeout(undoDelete.timer)
+    setTransactions(prev => prev.filter(item => item.id !== txId))
+    const timer = setTimeout(async () => {
+      const { error: deleteError } = await supabase.from('transactions').delete().eq('id', txId)
+      if (deleteError) {
+        setError(deleteError.message)
+        setTransactions(prev => [tx, ...prev])
+      }
+      setUndoDelete(null)
+    }, 3500)
+    setUndoDelete({ tx, timer })
+    return true
+  }
+
+  function undoTransactionDelete() {
+    if (!undoDelete) return
+    clearTimeout(undoDelete.timer)
+    setTransactions(prev => [undoDelete.tx, ...prev])
+    setUndoDelete(null)
   }
 
   async function saveCard(payload) {
@@ -225,6 +295,47 @@ function App() {
     await loadData()
   }
 
+  async function reorderCards(orderedIds) {
+    const active = orderedIds.map(id => cards.find(c => c.id === id)).filter(Boolean)
+    setCards(prev => {
+      const archived = prev.filter(c => c.archived)
+      return [...active.map((card,index) => ({ ...card, sortOrder:index })), ...archived]
+    })
+    await Promise.all(active.map((card,index) => supabase.from('cards').update({ sort_order:index }).eq('id', card.id)))
+  }
+
+  async function archiveCard(cardId) {
+    const card = cards.find(c => c.id === cardId)
+    if (!card) return
+    const { error: updateError } = await supabase.from('cards').update({ sort_order:-1 }).eq('id', cardId)
+    if (updateError) throw updateError
+    await loadData()
+  }
+
+  async function duplicateProgramsToNextPeriod(cardId) {
+    const card = cards.find(c => c.id === cardId)
+    if (!card?.rewardPrograms?.length) return 0
+    const rows = card.rewardPrograms.map(p => {
+      const shifted = shiftPeriod(p.startDate, p.endDate)
+      return {
+        user_id: session.user.id,
+        card_id: cardId,
+        name: p.name,
+        rate: p.rate,
+        reward_cap: p.rewardCap,
+        spend_cap: p.spendCap,
+        calc_mode: p.calcMode,
+        rounding: p.rounding,
+        start_date: shifted.startDate,
+        end_date: shifted.endDate,
+      }
+    })
+    const { error: insertError } = await supabase.from('reward_programs').insert(rows)
+    if (insertError) throw insertError
+    await loadData()
+    return rows.length
+  }
+
   async function signOut() {
     await supabase.auth.signOut()
     setShowSettings(false)
@@ -255,11 +366,16 @@ function App() {
         </button>
       </section>
 
+      {expiringPrograms.length > 0 && <div className="expiry-banner">
+        <div><strong>活動即將到期</strong><span>{expiringPrograms.slice(0,2).map(p => `${p.cardName}・${p.name} ${formatDateShort(p.endDate)}`).join('　')}</span></div>
+        <button onClick={() => selectedCard && setShowCardEditor(true)}>更新</button>
+      </div>}
+
       {loadingData ? <CenteredState compact title="同步資料中…" /> : !selectedCard ? (
         <EmptyCards onAdd={() => setShowCardEditor(true)} />
       ) : (
         <>
-          <CardStack cards={cards} selectedId={selectedCardId} onSelect={(id) => { setSelectedCardId(id); setShowTip(false) }} />
+          <CardStack cards={activeCards} selectedId={selectedCardId} onSelect={(id) => { setSelectedCardId(id); setShowTip(false) }} />
 
           <section className="summary-card">
             <div className="summary-head">
@@ -332,7 +448,9 @@ function App() {
                   key={tx.id}
                   tx={tx}
                   onToggleExcluded={() => toggleExcluded(tx.id)}
+                  onToggleReconciled={() => toggleReconciled(tx.id, true)}
                   onDelete={() => deleteTransaction(tx.id)}
+                  onEdit={() => setEditingTransaction(tx)}
                 />
               ))}
               {!visibleTransactions.length && <div className="empty-list">{periodMode === 'month' ? '這個月還沒有刷卡紀錄' : '這個區間還沒有刷卡紀錄'}</div>}
@@ -344,7 +462,7 @@ function App() {
       <nav className="bottom-nav">
         <button className="nav-item active"><span>▰</span><small>卡片</small></button>
         <button className="add-main" disabled={!selectedCard} onClick={() => selectedCard && setShowAddTx(true)}>＋</button>
-        <button className="nav-item" onClick={() => selectedCard && setShowCardEditor(true)}><span>⚙</span><small>卡片設定</small></button>
+        <button className="nav-item" onClick={() => setShowStats(true)}><span>▥</span><small>統計</small></button>
       </nav>
 
       {showAddTx && selectedCard && <AddTransactionModal card={selectedCard} transactions={transactions} onClose={() => setShowAddTx(false)} onSave={addTransaction} />}
@@ -359,8 +477,11 @@ function App() {
           setShowRangePicker(false)
         }}
       />}
-      {showCardEditor && <CardEditor card={selectedCard} onClose={() => setShowCardEditor(false)} onSaveCard={saveCard} onSaveProgram={saveProgram} onDeleteProgram={deleteProgram} />}
-      {showSettings && <AccountSheet email={session.user.email} onClose={() => setShowSettings(false)} onAddCard={() => { setShowSettings(false); setSelectedCardId(null); setShowCardEditor(true) }} onSignOut={signOut} />}
+      {editingTransaction && <TransactionEditor tx={editingTransaction} cards={activeCards} onClose={() => setEditingTransaction(null)} onSave={saveTransactionEdits} />}
+      {showCardEditor && <CardEditor card={selectedCard} onClose={() => setShowCardEditor(false)} onSaveCard={saveCard} onSaveProgram={saveProgram} onDeleteProgram={deleteProgram} onArchiveCard={archiveCard} onDuplicatePrograms={duplicateProgramsToNextPeriod} />}
+      {showStats && <StatsSheet cards={activeCards} transactions={transactions} month={month} onClose={() => setShowStats(false)} />}
+      {showSettings && <AccountSheet email={session.user.email} cards={activeCards} selectedCard={selectedCard} onClose={() => setShowSettings(false)} onAddCard={() => { setShowSettings(false); setSelectedCardId(null); setShowCardEditor(true) }} onEditCard={() => { setShowSettings(false); if(selectedCard) setShowCardEditor(true) }} onReorder={reorderCards} onSelectCard={setSelectedCardId} onSignOut={signOut} />}
+      {undoDelete && <div className="undo-toast"><span>已刪除「{undoDelete.tx.title}」</span><button onClick={undoTransactionDelete}>復原</button></div>}
     </div>
   )
 }
@@ -434,11 +555,12 @@ function EyeIcon({ open }) {
     : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.5-5 9-5 9 5 9 5-3.5 5-9 5-9-5-9-5z"/><circle cx="12" cy="12" r="2.5"/></svg>
 }
 
-function SwipeTransaction({ tx, onToggleExcluded, onDelete }) {
+function SwipeTransaction({ tx, onToggleExcluded, onToggleReconciled, onDelete, onEdit }) {
   const [offset, setOffset] = useState(0)
   const [touchStart, setTouchStart] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const revealWidth = 86
+  const reconcileWidth = 86
 
   function handleTouchStart(e) {
     const t = e.touches[0]
@@ -451,12 +573,17 @@ function SwipeTransaction({ tx, onToggleExcluded, onDelete }) {
     const dx = t.clientX - touchStart.x
     const dy = t.clientY - touchStart.y
     if (Math.abs(dx) <= Math.abs(dy)) return
-    const next = Math.max(-revealWidth, Math.min(0, touchStart.base + dx))
+    const next = Math.max(-revealWidth, Math.min(reconcileWidth, touchStart.base + dx))
     setOffset(next)
   }
 
-  function handleTouchEnd() {
-    setOffset(offset < -34 ? -revealWidth : 0)
+  async function handleTouchEnd() {
+    if (offset > 38) {
+      await onToggleReconciled()
+      setOffset(0)
+    } else {
+      setOffset(offset < -34 ? -revealWidth : 0)
+    }
     setTouchStart(null)
   }
 
@@ -470,7 +597,8 @@ function SwipeTransaction({ tx, onToggleExcluded, onDelete }) {
     }
   }
 
-  return <div className="swipe-row">
+  return <div className={`swipe-row ${tx.reconciled ? 'is-reconciled' : ''}`}>
+    <div className="swipe-reconcile"><span>✓</span><small>{tx.reconciled ? '已核對' : '核對'}</small></div>
     <button className="swipe-delete" onClick={remove} disabled={deleting}>{deleting ? '刪除中' : '刪除'}</button>
     <div
       className={`transaction swipe-content ${tx.excluded ? 'excluded' : ''}`}
@@ -479,9 +607,12 @@ function SwipeTransaction({ tx, onToggleExcluded, onDelete }) {
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchEnd}
-      onClick={() => offset < 0 && setOffset(0)}
+      onClick={() => {
+        if (offset !== 0) setOffset(0)
+        else onEdit()
+      }}
     >
-      <div><strong>{tx.title}</strong><span>{tx.date.slice(5).replace('-', '/')} {tx.excluded ? ' · 不計回饋' : ''}</span></div>
+      <div><strong>{tx.title}</strong><span>{tx.date.slice(5).replace('-', '/')} {tx.excluded ? ' · 不計回饋' : ''}{tx.reconciled ? ' · ✓ 已核對' : ''}</span></div>
       <div className="tx-right">
         <strong>{formatMoney(tx.amount)}</strong>
         <button className="mini-btn" onClick={(e) => { e.stopPropagation(); onToggleExcluded() }}>{tx.excluded ? '恢復回饋' : '排除回饋'}</button>
@@ -605,7 +736,48 @@ function RangePicker({ startDate, endDate, onClose, onApply }) {
   </div>
 }
 
-function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram }) {
+function TransactionEditor({ tx, cards, onClose, onSave }) {
+  const currentCard = cards.find(c => c.id === tx.cardId) || cards[0]
+  const [cardId,setCardId] = useState(tx.cardId)
+  const [date,setDate] = useState(tx.date)
+  const [postedDate,setPostedDate] = useState(tx.postedDate || '')
+  const [title,setTitle] = useState(tx.title)
+  const [amount,setAmount] = useState(String(tx.amount))
+  const [excluded,setExcluded] = useState(tx.excluded)
+  const [reconciled,setReconciled] = useState(tx.reconciled)
+  const [programExclusions,setProgramExclusions] = useState(tx.programExclusions || [])
+  const [busy,setBusy] = useState(false)
+  const selected = cards.find(c=>c.id===cardId) || currentCard
+
+  function toggleProgram(id) {
+    setProgramExclusions(prev => prev.includes(id) ? prev.filter(x=>x!==id) : [...prev,id])
+  }
+
+  async function save() {
+    setBusy(true)
+    try {
+      await onSave({ id:tx.id,cardId,date,postedDate,title,amount:Number(amount),excluded,reconciled,programExclusions })
+    } catch(e){ alert(e.message) }
+    finally { setBusy(false) }
+  }
+
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
+    <div className="sheet-grabber" /><div className="sheet-title-row"><h3>編輯刷卡紀錄</h3><button className="close-btn" onClick={onClose}>×</button></div>
+    <label>信用卡<select value={cardId} onChange={e=>{setCardId(e.target.value);setProgramExclusions([])}}>{cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+    <div className="two-col"><label>交易日<input type="date" value={date} onChange={e=>setDate(e.target.value)} /></label><label>入帳日（選填）<input type="date" value={postedDate} onChange={e=>setPostedDate(e.target.value)} /></label></div>
+    <label>刷卡項目<input value={title} onChange={e=>setTitle(e.target.value)} /></label>
+    <label>金額<input inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)} /><span className="field-hint">退款／退刷可輸入負數，例如 -1200</span></label>
+    <div className="toggle-row"><span>整筆不計回饋</span><button className={excluded?'toggle on':'toggle'} onClick={()=>setExcluded(v=>!v)}><i /></button></div>
+    <div className="toggle-row"><span>已核對帳單</span><button className={reconciled?'toggle on':'toggle'} onClick={()=>setReconciled(v=>!v)}><i /></button></div>
+    {!excluded && selected?.rewardPrograms?.length > 0 && <>
+      <div className="field-label">只排除指定回饋活動</div>
+      <div className="program-exclusion-list">{selected.rewardPrograms.map(p=><button key={p.id} className={programExclusions.includes(p.id)?'chosen':''} onClick={()=>toggleProgram(p.id)}>{programExclusions.includes(p.id)?'✓ ':''}{p.name} · {p.rate}%</button>)}</div>
+    </>}
+    <button className="primary-btn" disabled={busy || !title.trim() || !Number.isFinite(Number(amount))} onClick={save}>{busy?'儲存中…':'儲存修改'}</button>
+  </div></div>
+}
+
+function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram, onArchiveCard, onDuplicatePrograms }) {
   const isNew = !card
   const [name, setName] = useState(card?.name || '')
   const [bank, setBank] = useState(card?.bank || '')
@@ -647,6 +819,12 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram 
       {!isNew && <>
         <div className="divider" />
         <div className="sheet-title-row"><h3 className="subheading">回饋活動</h3><button className="small-add" onClick={() => setProgramEditing({})}>＋ 新增</button></div>
+        <button className="duplicate-programs" onClick={async () => {
+          try {
+            const count = await onDuplicatePrograms(card.id)
+            alert(`已複製 ${count} 個活動到下一期，可再逐一調整日期與回饋率。`)
+          } catch(e) { alert(e.message) }
+        }}>⧉ 複製所有活動到下一期</button>
         <div className="program-settings-list">
           {card.rewardPrograms.map(p => <div className="program-setting" key={p.id}>
             <button className="program-setting-main" onClick={() => setProgramEditing(p)}>
@@ -658,6 +836,12 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram 
           {!card.rewardPrograms.length && <div className="empty-list">尚未建立回饋活動</div>}
         </div>
       </>}
+
+      {!isNew && <button className="archive-card-btn" onClick={async () => {
+        if(confirm('封存這張卡？封存後會從首頁隱藏，交易資料仍保留。')) {
+          try { await onArchiveCard(card.id); onClose() } catch(e){ alert(e.message) }
+        }
+      }}>封存這張信用卡</button>}
 
       {programEditing && <ProgramEditor value={programEditing} onCancel={() => setProgramEditing(null)} onSave={async p => { try { await onSaveProgram(card.id,p); setProgramEditing(null) } catch(e){ alert(e.message) } }} />}
     </div>
@@ -685,12 +869,80 @@ function ProgramEditor({ value, onCancel, onSave }) {
   </div>
 }
 
-function AccountSheet({ email, onClose, onAddCard, onSignOut }) {
-  return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet" onMouseDown={e=>e.stopPropagation()}>
-    <div className="sheet-grabber" /><h3>帳號與資料</h3>
+function AccountSheet({ email, cards, selectedCard, onClose, onAddCard, onEditCard, onReorder, onSelectCard, onSignOut }) {
+  const [order, setOrder] = useState(cards.map(c => c.id))
+  const [dragId, setDragId] = useState(null)
+
+  async function dropOn(targetId) {
+    if (!dragId || dragId === targetId) return
+    const next = [...order]
+    const from = next.indexOf(dragId)
+    const to = next.indexOf(targetId)
+    next.splice(from,1)
+    next.splice(to,0,dragId)
+    setOrder(next)
+    setDragId(null)
+    await onReorder(next)
+  }
+
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
+    <div className="sheet-grabber" /><div className="sheet-title-row"><h3>帳號與卡片</h3><button className="close-btn" onClick={onClose}>×</button></div>
     <div className="account-email">{email}</div>
+    {selectedCard && <button className="settings-action" onClick={onEditCard}>⚙ 目前卡片設定</button>}
     <button className="settings-action" onClick={onAddCard}>＋ 新增信用卡</button>
+    <div className="field-label">卡片排序</div>
+    <div className="card-order-list">
+      {order.map(id => {
+        const card = cards.find(c => c.id === id)
+        if (!card) return null
+        return <div
+          key={id}
+          className={`card-order-item ${selectedCard?.id===id?'selected':''}`}
+          draggable
+          onDragStart={() => setDragId(id)}
+          onDragOver={e => e.preventDefault()}
+          onDrop={() => dropOn(id)}
+        >
+          <button className="order-handle" aria-label="拖曳排序">≡</button>
+          <button className="order-card-name" onClick={() => onSelectCard(id)}>{card.name}<span>{card.bank}</span></button>
+          <div className="order-arrows">
+            <button disabled={order[0]===id} onClick={() => { const i=order.indexOf(id); const n=[...order]; [n[i-1],n[i]]=[n[i],n[i-1]]; setOrder(n); onReorder(n) }}>↑</button>
+            <button disabled={order[order.length-1]===id} onClick={() => { const i=order.indexOf(id); const n=[...order]; [n[i+1],n[i]]=[n[i],n[i+1]]; setOrder(n); onReorder(n) }}>↓</button>
+          </div>
+        </div>
+      })}
+    </div>
+    <div className="order-help">桌面可拖曳；手機可用右側 ↑ ↓ 快速排序。</div>
     <button className="settings-action danger-text" onClick={onSignOut}>登出</button>
+  </div></div>
+}
+
+function StatsSheet({ cards, transactions, month, onClose }) {
+  const rows = cards.map(card => {
+    const s = calculateCardSummary(card, transactions, month)
+    const lost = s.programs.reduce((sum,p) => sum + Number(p.lostToCap || 0), 0)
+    return { card, ...s, lost }
+  })
+  const totalSpend = rows.reduce((s,r)=>s+r.totalSpend,0)
+  const totalReward = rows.reduce((s,r)=>s+r.totalReward,0)
+  const totalLost = rows.reduce((s,r)=>s+r.lost,0)
+  const best = [...rows].filter(r=>r.totalSpend>0).sort((a,b)=>b.effectiveRate-a.effectiveRate)[0]
+
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall stats-sheet" onMouseDown={e=>e.stopPropagation()}>
+    <div className="sheet-grabber" /><div className="sheet-title-row"><h3>{month.replace('-',' / ')} 統計</h3><button className="close-btn" onClick={onClose}>×</button></div>
+    <div className="stats-hero">
+      <div><span>總刷卡</span><strong>{formatMoney(totalSpend)}</strong></div>
+      <div><span>總回饋</span><strong>{formatMoney(totalReward)}</strong></div>
+      <div><span>整體回饋率</span><strong>{totalSpend ? formatPct(totalReward/totalSpend*100) : '0.00%'}</strong></div>
+    </div>
+    {best && <div className="best-card">本月效率最高 <strong>{best.card.name}</strong><span>{formatPct(best.effectiveRate)}</span></div>}
+    {totalLost > 0 && <div className="lost-reward">因活動上限未取得的理論回饋：約 <strong>{formatMoney(totalLost)}</strong></div>}
+    <div className="stats-list">
+      {rows.map(r => <div className="stats-row" key={r.card.id}>
+        <div><strong>{r.card.name}</strong><span>{formatMoney(r.totalSpend)} 刷卡</span></div>
+        <div><strong>{formatMoney(r.totalReward)}</strong><span>{formatPct(r.effectiveRate)}</span></div>
+      </div>)}
+    </div>
   </div></div>
 }
 
@@ -713,6 +965,28 @@ function lastDayOfMonth(month){
 function formatDateShort(date){
   const [,m,d] = date.split('-')
   return `${Number(m)}/${Number(d)}`
+}
+function addDays(dateStr, days){
+  const d = new Date(dateStr + 'T12:00:00')
+  d.setDate(d.getDate()+days)
+  return d.toISOString().slice(0,10)
+}
+function shiftPeriod(startDate,endDate){
+  if(!startDate && !endDate) return {startDate:null,endDate:null}
+  if(startDate && endDate){
+    const start = new Date(startDate+'T12:00:00')
+    const end = new Date(endDate+'T12:00:00')
+    const span = Math.max(1, Math.round((end-start)/86400000)+1)
+    const nextStart = new Date(end); nextStart.setDate(nextStart.getDate()+1)
+    const nextEnd = new Date(nextStart); nextEnd.setDate(nextEnd.getDate()+span-1)
+    return {startDate:nextStart.toISOString().slice(0,10),endDate:nextEnd.toISOString().slice(0,10)}
+  }
+  if(endDate){
+    const end = new Date(endDate+'T12:00:00'); const next = new Date(end); next.setDate(next.getDate()+1)
+    return {startDate:next.toISOString().slice(0,10),endDate:null}
+  }
+  const start = new Date(startDate+'T12:00:00'); const next = new Date(start); next.setMonth(next.getMonth()+1)
+  return {startDate:next.toISOString().slice(0,10),endDate:null}
 }
 
 createRoot(document.getElementById('root')).render(<App />)
