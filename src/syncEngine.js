@@ -104,6 +104,7 @@ export async function flushMutationQueue(userId) {
           remotePayload:result.remote,
           op:mutation.op,
           baseUpdatedAt:mutation.baseUpdatedAt,
+          programExclusions:mutation.programExclusions,
         })
         conflicts += 1
         continue
@@ -131,6 +132,7 @@ export async function resolveConflict(userId, conflict, choice) {
       op: conflict.op,
       payload: conflict.localPayload,
       baseUpdatedAt: conflict.baseUpdatedAt,
+      programExclusions: conflict.programExclusions,
     }
     await applyMutation(mutation, { force:true })
   }
