@@ -4,7 +4,7 @@ import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 
-const APP_VERSION = '0.2.7'
+const APP_VERSION = '0.2.8'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const PALETTES = [
@@ -690,11 +690,11 @@ function SheetGrabber({ onClose }) {
     function handleStart(e) {
       const touch = e.touches?.[0]
       if (!touch || sheet.scrollTop > 0) return
-      if (e.target.closest('button,input,select,textarea')) return
+      if (e.target.closest('button,input,select,textarea,a,[role="button"]')) return
 
       const rect = sheet.getBoundingClientRect()
       const localY = touch.clientY - rect.top
-      if (localY < 0 || localY > 118) return
+      if (localY < 0 || localY > rect.height) return
 
       startY = touch.clientY
       dragY = 0
@@ -833,8 +833,7 @@ function EmptyCards({ onAdd }) {
 }
 
 function CardStack({ cards, selectedId, onSelect, onReorder }) {
-  const selectedIndex = Math.max(0, cards.findIndex(c => c.id === selectedId))
-  const ordered = [...cards.slice(selectedIndex), ...cards.slice(0, selectedIndex)]
+  const ordered = cards
   const [drag, setDrag] = useState(null)
   const dragRef = React.useRef(null)
   const timerRef = React.useRef(null)
@@ -1100,9 +1099,9 @@ function RangePicker({ startDate, endDate, onClose, onApply }) {
         <button className={mode === 'date' ? 'selected' : ''} onClick={() => setMode('date')}>自訂日期</button>
         <button className={mode === 'month' ? 'selected' : ''} onClick={() => setMode('month')}>月份區間</button>
       </div>
-      {mode === 'date' ? <div className="two-col">
-        <label>開始日期<input type="date" value={start} onChange={e => setStart(e.target.value)} /></label>
-        <label>結束日期<input type="date" value={end} onChange={e => setEnd(e.target.value)} /></label>
+      {mode === 'date' ? <div className="two-col range-date-grid">
+        <label>開始日期<DateField value={start} onChange={setStart} /></label>
+        <label>結束日期<DateField value={end} onChange={setEnd} /></label>
       </div> : <div className="two-col">
         <label>起始月份<input type="month" value={startMonth} onChange={e => setStartMonth(e.target.value)} /></label>
         <label>結束月份<input type="month" value={endMonth} onChange={e => setEndMonth(e.target.value)} /></label>
