@@ -296,3 +296,73 @@ h2,h3{margin:0}
     padding-right:6px !important;
   }
 }
+
+/* v0.2.6: visual date controls use our own box; native iOS date input is transparent */
+.transaction-date-grid{
+  display:grid !important;
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr) !important;
+  gap:10px !important;
+  align-items:end !important;
+}
+.transaction-date-grid label{
+  min-width:0 !important;
+  width:100% !important;
+}
+.custom-date-field{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  width:100%;
+  height:48px;
+  margin-top:7px;
+  padding:0 12px;
+  box-sizing:border-box;
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:#101216;
+  color:#f3f1ea;
+  font-size:16px;
+  line-height:1;
+  overflow:hidden;
+}
+.custom-date-field.empty{
+  color:#757d87;
+}
+.custom-date-field > span:first-child{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.date-chevron{
+  flex:0 0 auto;
+  color:#68717b;
+  font-size:14px;
+  transform:translateY(-1px);
+}
+.custom-date-field input[type="date"]{
+  position:absolute !important;
+  inset:0 !important;
+  width:100% !important;
+  height:100% !important;
+  min-width:0 !important;
+  max-width:none !important;
+  margin:0 !important;
+  padding:0 !important;
+  opacity:0 !important;
+  border:0 !important;
+  background:transparent !important;
+  cursor:pointer;
+  font-size:16px !important;
+}
+@media (max-width:380px){
+  .transaction-date-grid{
+    gap:8px !important;
+  }
+  .custom-date-field{
+    padding:0 10px;
+    font-size:15px;
+  }
+}
