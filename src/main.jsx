@@ -26,6 +26,7 @@ function App() {
   const [showTip, setShowTip] = useState(false)
   const [showAddTx, setShowAddTx] = useState(false)
   const [showCardEditor, setShowCardEditor] = useState(false)
+  const [creatingCard, setCreatingCard] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [editingTransaction, setEditingTransaction] = useState(null)
@@ -53,7 +54,7 @@ function App() {
     }
   }, [session?.user?.id])
 
-  async function loadData() {
+  async function loadData(preferredSelectedId = null) {
     setLoadingData(true)
     setError('')
     const [cardsRes, programsRes, txRes, exclusionsRes] = await Promise.all([
@@ -113,7 +114,13 @@ function App() {
     setCards(nextCards)
     setTransactions(nextTx)
     const activeCards = nextCards.filter(c => !c.archived)
-    setSelectedCardId(prev => activeCards.some(c => c.id === prev) ? prev : activeCards[0]?.id || null)
+    setSelectedCardId(prev =>
+      preferredSelectedId && activeCards.some(c => c.id === preferredSelectedId)
+        ? preferredSelectedId
+        : activeCards.some(c => c.id === prev)
+          ? prev
+          : activeCards[0]?.id || null
+    )
     setLoadingData(false)
   }
 
@@ -194,7 +201,7 @@ function App() {
   }
 
   async function saveTransactionEdits(payload) {
-    const { error: updateError } = await supabase.from('transactions').update({
+    const updatePromise = supabase.from('transactions').update({
       card_id: payload.cardId,
       transaction_date: payload.date,
       posted_date: payload.postedDate || null,
@@ -203,10 +210,12 @@ function App() {
       excluded: payload.excluded,
       reconciled: payload.reconciled,
     }).eq('id', payload.id)
-    if (updateError) throw updateError
 
-    const { error: clearError } = await supabase.from('transaction_reward_exclusions').delete().eq('transaction_id', payload.id)
+    const clearPromise = supabase.from('transaction_reward_exclusions').delete().eq('transaction_id', payload.id)
+    const [{ error: updateError }, { error: clearError }] = await Promise.all([updatePromise, clearPromise])
+    if (updateError) throw updateError
     if (clearError) throw clearError
+
     if (payload.programExclusions?.length) {
       const rows = payload.programExclusions.map(rewardProgramId => ({
         user_id: session.user.id,
@@ -216,8 +225,20 @@ function App() {
       const { error: exclusionError } = await supabase.from('transaction_reward_exclusions').insert(rows)
       if (exclusionError) throw exclusionError
     }
+
+    setTransactions(prev => prev.map(item => item.id === payload.id ? {
+      ...item,
+      cardId: payload.cardId,
+      date: payload.date,
+      postedDate: payload.postedDate || null,
+      title: payload.title.trim(),
+      amount: Number(payload.amount),
+      excluded: payload.excluded,
+      reconciled: payload.reconciled,
+      programExclusions: [...(payload.programExclusions || [])],
+    } : item))
     setEditingTransaction(null)
-    await loadData()
+    loadData().catch(err => setError(err.message))
   }
 
   async function deleteTransaction(txId) {
@@ -264,6 +285,8 @@ function App() {
       const { data, error: insertError } = await supabase.from('cards').insert(base).select().single()
       if (insertError) throw insertError
       setSelectedCardId(data.id)
+      await loadData(data.id)
+      return
     }
     await loadData()
   }
@@ -375,14 +398,14 @@ function App() {
 
       {expiringPrograms.length > 0 && <div className="expiry-banner">
         <div><strong>活動即將到期</strong><span>{expiringPrograms.slice(0,2).map(p => `${p.cardName}・${p.name} ${formatDateShort(p.endDate)}`).join('　')}</span></div>
-        <button onClick={() => selectedCard && setShowCardEditor(true)}>更新</button>
+        <button onClick={() => { if (selectedCard) { setCreatingCard(false); setShowCardEditor(true) } }}>更新</button>
       </div>}
 
       {loadingData ? <CenteredState compact title="同步資料中…" /> : !selectedCard ? (
-        <EmptyCards onAdd={() => setShowCardEditor(true)} />
+        <EmptyCards onAdd={() => { setCreatingCard(true); setShowCardEditor(true) }} />
       ) : (
         <>
-          <CardStack cards={activeCards} selectedId={selectedCardId} onSelect={(id) => { setSelectedCardId(id); setShowTip(false) }} />
+          <CardStack cards={activeCards} selectedId={selectedCardId} onSelect={(id) => { setSelectedCardId(id); setShowTip(false) }} onReorder={reorderCards} />
 
           <section className="summary-card">
             <div className="summary-head">
@@ -455,7 +478,7 @@ function App() {
                   key={tx.id}
                   tx={tx}
                   onToggleExcluded={() => toggleExcluded(tx.id)}
-                  onToggleReconciled={() => toggleReconciled(tx.id, true)}
+                  onToggleReconciled={() => toggleReconciled(tx.id)}
                   onDelete={() => deleteTransaction(tx.id)}
                   onEdit={() => setEditingTransaction(tx)}
                 />
@@ -485,9 +508,9 @@ function App() {
         }}
       />}
       {editingTransaction && <TransactionEditor tx={editingTransaction} cards={activeCards} onClose={() => setEditingTransaction(null)} onSave={saveTransactionEdits} />}
-      {showCardEditor && <CardEditor card={selectedCard} onClose={() => setShowCardEditor(false)} onSaveCard={saveCard} onSaveProgram={saveProgram} onDeleteProgram={deleteProgram} onArchiveCard={archiveCard} onDuplicatePrograms={duplicateProgramsToNextPeriod} />}
+      {showCardEditor && <CardEditor card={creatingCard ? null : selectedCard} onClose={() => { setShowCardEditor(false); setCreatingCard(false) }} onSaveCard={saveCard} onSaveProgram={saveProgram} onDeleteProgram={deleteProgram} onArchiveCard={archiveCard} onDuplicatePrograms={duplicateProgramsToNextPeriod} />}
       {showStats && <StatsSheet cards={activeCards} transactions={transactions} month={month} onClose={() => setShowStats(false)} />}
-      {showSettings && <AccountSheet email={session.user.email} cards={cards} selectedCard={selectedCard} onClose={() => setShowSettings(false)} onAddCard={() => { setShowSettings(false); setSelectedCardId(null); setShowCardEditor(true) }} onEditCard={() => { setShowSettings(false); if(selectedCard) setShowCardEditor(true) }} onReorder={reorderCards} onSelectCard={setSelectedCardId} onRestoreCard={restoreCard} onSignOut={signOut} />}
+      {showSettings && <AccountSheet email={session.user.email} cards={cards} selectedCard={selectedCard} onClose={() => setShowSettings(false)} onAddCard={() => { setShowSettings(false); setCreatingCard(true); setShowCardEditor(true) }} onEditCard={() => { setShowSettings(false); if(selectedCard) { setCreatingCard(false); setShowCardEditor(true) } }} onRestoreCard={restoreCard} onSignOut={signOut} />}
       {undoDelete && <div className="undo-toast"><span>已刪除「{undoDelete.tx.title}」</span><button onClick={undoTransactionDelete}>復原</button></div>}
     </div>
   )
@@ -616,7 +639,7 @@ function SwipeTransaction({ tx, onToggleExcluded, onToggleReconciled, onDelete, 
   }
 
   return <div className={`swipe-row ${tx.reconciled ? 'is-reconciled' : ''}`}>
-    <div className="swipe-reconcile"><span>✓</span><small>{tx.reconciled ? '已核對' : '核對'}</small></div>
+    <div className={`swipe-reconcile ${tx.reconciled ? 'undo-reconcile' : ''}`}><span>{tx.reconciled ? '↶' : '✓'}</span><small>{tx.reconciled ? '未核對' : '已核對'}</small></div>
     <button className="swipe-delete" onClick={remove} disabled={deleting}>{deleting ? '刪除中' : '刪除'}</button>
     <div
       className={`transaction swipe-content ${tx.excluded ? 'excluded' : ''}`}
@@ -648,18 +671,70 @@ function EmptyCards({ onAdd }) {
   </section>
 }
 
-function CardStack({ cards, selectedId, onSelect }) {
+function CardStack({ cards, selectedId, onSelect, onReorder }) {
   const selectedIndex = Math.max(0, cards.findIndex(c => c.id === selectedId))
   const ordered = [...cards.slice(selectedIndex), ...cards.slice(0, selectedIndex)]
-  return <section className="wallet-stack" aria-label="選擇信用卡">
-    {ordered.map((card, index) => (
-      <button key={card.id} className={`wallet-card ${index === 0 ? 'selected' : ''}`}
-        style={{ '--stack-index': index, '--card-a': card.colors[0], '--card-b': card.colors[1] }} onClick={() => onSelect(card.id)}>
+  const [drag, setDrag] = useState(null)
+  const longPressRef = React.useRef(null)
+
+  function startPress(e, cardId, index) {
+    if (cards.length < 2) return
+    const pointerId = e.pointerId
+    const startY = e.clientY
+    longPressRef.current = setTimeout(() => {
+      e.currentTarget?.setPointerCapture?.(pointerId)
+      setDrag({ cardId, index, startY, currentY:startY, active:true })
+    }, 320)
+  }
+
+  function movePress(e) {
+    if (!drag?.active) return
+    e.preventDefault()
+    setDrag(prev => ({ ...prev, currentY:e.clientY }))
+  }
+
+  async function endPress(e, cardId) {
+    clearTimeout(longPressRef.current)
+    longPressRef.current = null
+    if (!drag?.active || drag.cardId !== cardId) {
+      setDrag(null)
+      onSelect(cardId)
+      return
+    }
+
+    const delta = drag.currentY - drag.startY
+    const steps = Math.round(delta / 38)
+    const targetIndex = Math.max(0, Math.min(ordered.length - 1, drag.index + steps))
+    if (targetIndex !== drag.index) {
+      const next = [...ordered]
+      const [moved] = next.splice(drag.index,1)
+      next.splice(targetIndex,0,moved)
+      await onReorder(next.map(x => x.id))
+      onSelect(moved.id)
+    }
+    setDrag(null)
+  }
+
+  return <section className={`wallet-stack ${drag?.active ? 'reordering' : ''}`} aria-label="選擇信用卡">
+    {ordered.map((card, index) => {
+      const dragging = drag?.active && drag.cardId === card.id
+      const dy = dragging ? Math.max(-76, Math.min(76, drag.currentY - drag.startY)) : 0
+      return <button
+        key={card.id}
+        className={`wallet-card ${index === 0 ? 'selected' : ''} ${dragging ? 'dragging-card' : ''}`}
+        style={{ '--stack-index': index, '--card-a': card.colors[0], '--card-b': card.colors[1], '--drag-y': `${dy}px` }}
+        onPointerDown={e => startPress(e, card.id, index)}
+        onPointerMove={movePress}
+        onPointerUp={e => endPress(e, card.id)}
+        onPointerCancel={() => { clearTimeout(longPressRef.current); setDrag(null) }}
+        onContextMenu={e => e.preventDefault()}
+      >
         <div className="card-top"><span>{card.bank || 'CARD'}</span><span>{card.last4 ? `•••• ${card.last4}` : ''}</span></div>
         <div className="card-name">{card.name}</div>
         <div className="card-bottom"><span>REWARDS</span><span>%</span></div>
       </button>
-    ))}
+    })}
+    {cards.length > 1 && <div className="wallet-reorder-hint">長按卡片可拖曳排序</div>}
   </section>
 }
 
@@ -667,14 +742,16 @@ function AddTransactionModal({ card, transactions, onClose, onSave }) {
   const [date, setDate] = useState(localToday())
   const [title, setTitle] = useState('')
   const [amount, setAmount] = useState('')
+  const [isRefund, setIsRefund] = useState(false)
   const [busy, setBusy] = useState(false)
   const previewMonth = date.slice(0,7)
+  const signedAmount = Number(amount) ? (isRefund ? -Math.abs(Number(amount)) : Math.abs(Number(amount))) : 0
   const baseSummary = useMemo(() => calculateCardSummary(card, transactions, previewMonth), [card, transactions, previewMonth])
   const projected = useMemo(() => {
-    if (!Number(amount)) return null
-    const fake = { id:'preview', cardId:card.id, date, title:title || 'preview', amount:Number(amount), excluded:false, programExclusions:[] }
+    if (!signedAmount) return null
+    const fake = { id:'preview', cardId:card.id, date, title:title || 'preview', amount:signedAmount, excluded:false, programExclusions:[] }
     return calculateCardSummary(card, [fake, ...transactions], previewMonth)
-  }, [amount, date, title, card, transactions, previewMonth])
+  }, [signedAmount, date, title, card, transactions, previewMonth])
 
   const capWarnings = useMemo(() => {
     if (!projected) return []
@@ -684,13 +761,13 @@ function AddTransactionModal({ card, transactions, onClose, onSave }) {
       let remainingSpend
       if (after.spendCap != null) remainingSpend = Math.max(0, after.spendCap - before.eligibleSpend)
       else if (after.rewardCap != null) remainingSpend = Math.max(0, (after.rewardCap - before.reward) / (after.rate / 100))
-      if (remainingSpend == null || remainingSpend >= Number(amount)) return []
-      return [{ name:after.name, rate:after.rate, eligible:Math.floor(remainingSpend), excess:Math.max(0, Math.ceil(Number(amount)-remainingSpend)) }]
+      if (remainingSpend == null || remainingSpend >= Math.abs(signedAmount)) return []
+      return [{ name:after.name, rate:after.rate, eligible:Math.floor(remainingSpend), excess:Math.max(0, Math.ceil(Math.abs(signedAmount)-remainingSpend)) }]
     })
-  }, [projected, baseSummary, amount])
+  }, [projected, baseSummary, signedAmount, isRefund])
 
   const rewardBreakdown = useMemo(() => {
-    if (!projected || !Number(amount)) return []
+    if (!projected || !signedAmount || isRefund) return []
     return projected.programs.map(after => {
       const before = baseSummary.programs.find(p => p.id === after.id)
       const beforeReward = Number(before?.reward || 0)
@@ -700,15 +777,15 @@ function AddTransactionModal({ card, transactions, onClose, onSave }) {
         name: after.name,
         rate: after.rate,
         gained,
-        effective: Number(amount) ? gained / Number(amount) * 100 : 0,
+        effective: signedAmount ? gained / Math.abs(signedAmount) * 100 : 0,
         capped: after.capped,
       }
     })
-  }, [projected, baseSummary, amount])
+  }, [projected, baseSummary, signedAmount])
 
   async function save() {
     setBusy(true)
-    try { await onSave({ cardId:card.id, date, title, amount:Number(amount) }) }
+    try { await onSave({ cardId:card.id, date, title, amount:signedAmount }) }
     catch (e) { alert(e.message) }
     finally { setBusy(false) }
   }
@@ -719,12 +796,17 @@ function AddTransactionModal({ card, transactions, onClose, onSave }) {
       <h3>新增刷卡</h3>
       <div className="selected-mini-card">{card.name}<span>{card.bank}</span></div>
       <label>日期<input type="date" value={date} onChange={e => setDate(e.target.value)} /></label>
-      <label>刷卡項目<input autoFocus placeholder="手動輸入，例如：加油" value={title} onChange={e => setTitle(e.target.value)} /></label>
-      <label>金額<input inputMode="decimal" placeholder="$ 0" value={amount} onChange={e => setAmount(e.target.value)} /></label>
+      <label>刷卡項目<input placeholder="手動輸入，例如：加油" value={title} onChange={e => setTitle(e.target.value)} /></label>
+      <label>金額
+        <div className="amount-with-refund">
+          <input inputMode="decimal" placeholder="$ 0" value={amount} onChange={e => setAmount(e.target.value.replace(/^-/,''))} />
+          <button type="button" className={`refund-chip ${isRefund ? 'active' : ''}`} onClick={() => setIsRefund(v => !v)}>退刷</button>
+        </div>
+      </label>
       {projected && <div className="reward-preview"><span>新增後本月預估總回饋</span><strong>{formatMoney(projected.totalReward)} · {formatPct(projected.effectiveRate)}</strong></div>}
       {rewardBreakdown.length > 0 && <div className="reward-breakdown">{rewardBreakdown.map(p => <div key={p.id}><span>{p.name} · {p.rate}%{p.capped ? ' · 已達上限' : ''}</span><strong>本筆 +{formatMoney(p.gained)} <small>({formatPct(p.effective)})</small></strong></div>)}</div>}
       {capWarnings.map(w => <div className="cap-warning" key={w.name}><strong>{w.name}｜{w.rate}% 將達上限</strong><div>本筆約前 {formatMoney(w.eligible)} 仍可取得此活動回饋，剩餘 {formatMoney(w.excess)} 超過該活動上限；其他活動仍會各自計算。</div></div>)}
-      <button className="primary-btn" disabled={busy || !title.trim() || !Number(amount)} onClick={save}>{busy ? '儲存中…' : '新增'}</button>
+      <button className="primary-btn" disabled={busy || !title.trim() || !signedAmount} onClick={save}>{busy ? '儲存中…' : '新增'}</button>
     </div>
   </div>
 }
@@ -778,7 +860,8 @@ function TransactionEditor({ tx, cards, onClose, onSave }) {
   const [date,setDate] = useState(tx.date)
   const [postedDate,setPostedDate] = useState(tx.postedDate || '')
   const [title,setTitle] = useState(tx.title)
-  const [amount,setAmount] = useState(String(tx.amount))
+  const [amount,setAmount] = useState(String(Math.abs(tx.amount)))
+  const [isRefund,setIsRefund] = useState(Number(tx.amount) < 0)
   const [excluded,setExcluded] = useState(tx.excluded)
   const [reconciled,setReconciled] = useState(tx.reconciled)
   const [programExclusions,setProgramExclusions] = useState(tx.programExclusions || [])
@@ -792,7 +875,7 @@ function TransactionEditor({ tx, cards, onClose, onSave }) {
   async function save() {
     setBusy(true)
     try {
-      await onSave({ id:tx.id,cardId,date,postedDate,title,amount:Number(amount),excluded,reconciled,programExclusions })
+      await onSave({ id:tx.id,cardId,date,postedDate,title,amount:isRefund ? -Math.abs(Number(amount)) : Math.abs(Number(amount)),excluded,reconciled,programExclusions })
     } catch(e){ alert(e.message) }
     finally { setBusy(false) }
   }
@@ -800,9 +883,14 @@ function TransactionEditor({ tx, cards, onClose, onSave }) {
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
     <SheetGrabber onClose={onClose} /><div className="sheet-title-row"><h3>編輯刷卡紀錄</h3><button className="close-btn" onClick={onClose}>×</button></div>
     <label>信用卡<select value={cardId} onChange={e=>{setCardId(e.target.value);setProgramExclusions([])}}>{cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-    <div className="two-col"><label>交易日<input type="date" value={date} onChange={e=>setDate(e.target.value)} /></label><label>入帳日（選填）<input type="date" value={postedDate} onChange={e=>setPostedDate(e.target.value)} /></label></div>
+    <div className="two-col transaction-date-grid"><label>交易日<input type="date" value={date} onChange={e=>setDate(e.target.value)} /></label><label>入帳日（選填）<input type="date" value={postedDate} onChange={e=>setPostedDate(e.target.value)} /></label></div>
     <label>刷卡項目<input value={title} onChange={e=>setTitle(e.target.value)} /></label>
-    <label>金額<input inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value)} /><span className="field-hint">退款／退刷可輸入負數，例如 -1200</span></label>
+    <label>金額
+      <div className="amount-with-refund">
+        <input inputMode="decimal" value={amount} onChange={e=>setAmount(e.target.value.replace(/^-/,''))} />
+        <button type="button" className={`refund-chip ${isRefund ? 'active' : ''}`} onClick={()=>setIsRefund(v=>!v)}>退刷</button>
+      </div>
+    </label>
     <div className="toggle-row"><span>整筆不計回饋</span><button className={excluded?'toggle on':'toggle'} onClick={()=>setExcluded(v=>!v)}><i /></button></div>
     <div className="toggle-row"><span>已核對帳單</span><button className={reconciled?'toggle on':'toggle'} onClick={()=>setReconciled(v=>!v)}><i /></button></div>
     {!excluded && selected?.rewardPrograms?.length > 0 && <>
@@ -905,52 +993,14 @@ function ProgramEditor({ value, onCancel, onSave }) {
   </div>
 }
 
-function AccountSheet({ email, cards, selectedCard, onClose, onAddCard, onEditCard, onReorder, onSelectCard, onRestoreCard, onSignOut }) {
-  const active = cards.filter(c => !c.archived)
+function AccountSheet({ email, cards, selectedCard, onClose, onAddCard, onEditCard, onRestoreCard, onSignOut }) {
   const archived = cards.filter(c => c.archived)
-  const [order, setOrder] = useState(active.map(c => c.id))
-  const [dragId, setDragId] = useState(null)
-
-  async function dropOn(targetId) {
-    if (!dragId || dragId === targetId) return
-    const next = [...order]
-    const from = next.indexOf(dragId)
-    const to = next.indexOf(targetId)
-    next.splice(from,1)
-    next.splice(to,0,dragId)
-    setOrder(next)
-    setDragId(null)
-    await onReorder(next)
-  }
 
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
     <SheetGrabber onClose={onClose} /><div className="sheet-title-row"><h3>帳號與卡片</h3><button className="close-btn" onClick={onClose}>×</button></div>
     <div className="account-email">{email}</div>
     {selectedCard && <button className="settings-action" onClick={onEditCard}>⚙ 目前卡片設定</button>}
     <button className="settings-action" onClick={onAddCard}>＋ 新增信用卡</button>
-    <div className="field-label">卡片排序</div>
-    <div className="card-order-list">
-      {order.map(id => {
-        const card = cards.find(c => c.id === id)
-        if (!card) return null
-        return <div
-          key={id}
-          className={`card-order-item ${selectedCard?.id===id?'selected':''}`}
-          draggable
-          onDragStart={() => setDragId(id)}
-          onDragOver={e => e.preventDefault()}
-          onDrop={() => dropOn(id)}
-        >
-          <button className="order-handle" aria-label="拖曳排序">≡</button>
-          <button className="order-card-name" onClick={() => onSelectCard(id)}>{card.name}<span>{card.bank}</span></button>
-          <div className="order-arrows">
-            <button disabled={order[0]===id} onClick={() => { const i=order.indexOf(id); const n=[...order]; [n[i-1],n[i]]=[n[i],n[i-1]]; setOrder(n); onReorder(n) }}>↑</button>
-            <button disabled={order[order.length-1]===id} onClick={() => { const i=order.indexOf(id); const n=[...order]; [n[i+1],n[i]]=[n[i],n[i+1]]; setOrder(n); onReorder(n) }}>↓</button>
-          </div>
-        </div>
-      })}
-    </div>
-    <div className="order-help">桌面可拖曳；手機可用右側 ↑ ↓ 快速排序。</div>
     {archived.length > 0 && <>
       <div className="field-label">已封存</div>
       <div className="archived-list">{archived.map(card => <div className="archived-card" key={card.id}><span>{card.name}</span><button onClick={async()=>{try{await onRestoreCard(card.id)}catch(e){alert(e.message)}}}>恢復</button></div>)}</div>
