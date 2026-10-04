@@ -4,7 +4,7 @@ import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 
-const APP_VERSION = '0.2.9'
+const APP_VERSION = '0.3.0'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const PALETTES = [
@@ -913,10 +913,11 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
     }
 
     e.preventDefault()
-    const slot = 60
+    const slot = 76
     const delta = y - state.startY
     const rawTarget = state.index + Math.round(delta / slot)
     const targetIndex = Math.max(0, Math.min(ordered.length - 1, rawTarget))
+    if (targetIndex !== state.targetIndex && navigator.vibrate) navigator.vibrate(7)
     const nextState = { ...state, currentY:y, targetIndex }
     dragRef.current = nextState
     setDrag(nextState)
@@ -966,13 +967,13 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
 
   return <section
     className={`wallet-stack ${drag?.active ? 'reordering' : ''}`}
-    style={drag?.active ? { height: `${190 + Math.max(0, ordered.length - 1) * 60 + 28}px` } : undefined}
+    style={drag?.active ? { height: `${126 + Math.max(0, ordered.length - 1) * 76 + 34}px` } : undefined}
     aria-label="選擇信用卡"
   >
     {ordered.map((card, index) => {
       const dragging = drag?.active && drag.cardId === card.id
       const shownIndex = displayIndex(index)
-      const maxTravel = Math.max(60, (ordered.length - 1) * 60)
+      const maxTravel = Math.max(76, (ordered.length - 1) * 76)
       const dy = dragging ? Math.max(-maxTravel, Math.min(maxTravel, drag.currentY - drag.startY)) : 0
 
       return <button
