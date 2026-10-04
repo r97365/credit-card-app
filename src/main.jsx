@@ -4,7 +4,7 @@ import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 
-const APP_VERSION = '0.2.2'
+const APP_VERSION = '0.2.3'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const PALETTES = [
@@ -243,33 +243,9 @@ function App() {
   }
 
   async function saveTransactionEdits(payload) {
-    const updatePromise = supabase.from('transactions').update({
-      card_id: payload.cardId,
-      transaction_date: payload.date,
-      posted_date: payload.postedDate || null,
-      title: payload.title.trim(),
-      amount: Number(payload.amount),
-      excluded: payload.excluded,
-      reconciled: payload.reconciled,
-    }).eq('id', payload.id)
-
-    const clearPromise = supabase.from('transaction_reward_exclusions').delete().eq('transaction_id', payload.id)
-    const [{ error: updateError }, { error: clearError }] = await Promise.all([updatePromise, clearPromise])
-    if (updateError) throw updateError
-    if (clearError) throw clearError
-
-    if (payload.programExclusions?.length) {
-      const rows = payload.programExclusions.map(rewardProgramId => ({
-        user_id: session.user.id,
-        transaction_id: payload.id,
-        reward_program_id: rewardProgramId,
-      }))
-      const { error: exclusionError } = await supabase.from('transaction_reward_exclusions').insert(rows)
-      if (exclusionError) throw exclusionError
-    }
-
-    setTransactions(prev => prev.map(item => item.id === payload.id ? {
-      ...item,
+    const previousTx = transactions.find(item => item.id === payload.id)
+    const optimisticTx = previousTx ? {
+      ...previousTx,
       cardId: payload.cardId,
       date: payload.date,
       postedDate: payload.postedDate || null,
@@ -278,8 +254,45 @@ function App() {
       excluded: payload.excluded,
       reconciled: payload.reconciled,
       programExclusions: [...(payload.programExclusions || [])],
-    } : item))
-    setEditingTransaction(null)
+    } : null
+
+    if (optimisticTx) {
+      setTransactions(prev => prev.map(item => item.id === payload.id ? optimisticTx : item))
+    }
+
+    try {
+      const [{ error: updateError }, { error: clearError }] = await Promise.all([
+        supabase.from('transactions').update({
+          card_id: payload.cardId,
+          transaction_date: payload.date,
+          posted_date: payload.postedDate || null,
+          title: payload.title.trim(),
+          amount: Number(payload.amount),
+          excluded: payload.excluded,
+          reconciled: payload.reconciled,
+        }).eq('id', payload.id),
+        supabase.from('transaction_reward_exclusions').delete().eq('transaction_id', payload.id),
+      ])
+      if (updateError) throw updateError
+      if (clearError) throw clearError
+
+      if (payload.programExclusions?.length) {
+        const rows = payload.programExclusions.map(rewardProgramId => ({
+          user_id: session.user.id,
+          transaction_id: payload.id,
+          reward_program_id: rewardProgramId,
+        }))
+        const { error: exclusionError } = await supabase.from('transaction_reward_exclusions').insert(rows)
+        if (exclusionError) throw exclusionError
+      }
+
+      setEditingTransaction(null)
+    } catch (err) {
+      if (previousTx) {
+        setTransactions(prev => prev.map(item => item.id === payload.id ? previousTx : item))
+      }
+      throw err
+    }
   }
 
   async function deleteTransaction(txId) {
@@ -694,7 +707,7 @@ function SwipeTransaction({ tx, onToggleExcluded, onToggleReconciled, onDelete, 
         else onEdit()
       }}
     >
-      <div><strong>{tx.title}</strong><span>{tx.date.slice(5).replace('-', '/')} {tx.excluded ? ' · 不計回饋' : ''}{tx.reconciled ? ' · ✓ 已核對' : ''}</span></div>
+      <div><strong>{tx.title}</strong><span>{tx.date.slice(5).replace('-', '/')} {tx.excluded ? ' · 整筆不計回饋' : tx.programExclusions?.length ? ` · 已排除 ${tx.programExclusions.length} 個活動` : ''}{tx.reconciled ? ' · ✓ 已核對' : ''}</span></div>
       <div className="tx-right">
         <strong>{formatMoney(tx.amount)}</strong>
         <button className="mini-btn" onClick={(e) => { e.stopPropagation(); onToggleExcluded() }}>{tx.excluded ? '恢復回饋' : '排除回饋'}</button>
@@ -836,7 +849,7 @@ function AddTransactionModal({ card, transactions, onClose, onSave }) {
       <SheetGrabber onClose={onClose} />
       <h3>新增刷卡</h3>
       <div className="selected-mini-card">{card.name}<span>{card.bank}</span></div>
-      <label>日期<input type="date" value={date} onChange={e => setDate(e.target.value)} /></label>
+      <label>日期<input className="compact-date-input" type="date" value={date} onChange={e => setDate(e.target.value)} /></label>
       <label>刷卡項目<input placeholder="手動輸入，例如：加油" value={title} onChange={e => setTitle(e.target.value)} /></label>
       <label>金額
         <div className="amount-with-refund">
@@ -924,7 +937,7 @@ function TransactionEditor({ tx, cards, onClose, onSave }) {
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
     <SheetGrabber onClose={onClose} /><div className="sheet-title-row"><h3>編輯刷卡紀錄</h3><button className="close-btn" onClick={onClose}>×</button></div>
     <label>信用卡<select value={cardId} onChange={e=>{setCardId(e.target.value);setProgramExclusions([])}}>{cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-    <div className="two-col transaction-date-grid"><label>交易日<input type="date" value={date} onChange={e=>setDate(e.target.value)} /></label><label>入帳日（選填）<input type="date" value={postedDate} onChange={e=>setPostedDate(e.target.value)} /></label></div>
+    <div className="transaction-date-grid"><label>交易日<input className="compact-date-input" type="date" value={date} onChange={e=>setDate(e.target.value)} /></label><label>入帳日（選填）<input className="compact-date-input" type="date" value={postedDate} onChange={e=>setPostedDate(e.target.value)} /></label></div>
     <label>刷卡項目<input value={title} onChange={e=>setTitle(e.target.value)} /></label>
     <label>金額
       <div className="amount-with-refund">
