@@ -4,7 +4,7 @@ import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 
-const APP_VERSION = '0.3.0'
+const APP_VERSION = '0.3.1'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const PALETTES = [
@@ -913,7 +913,7 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
     }
 
     e.preventDefault()
-    const slot = 76
+    const slot = 38
     const delta = y - state.startY
     const rawTarget = state.index + Math.round(delta / slot)
     const targetIndex = Math.max(0, Math.min(ordered.length - 1, rawTarget))
@@ -965,15 +965,11 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
     return index
   }
 
-  return <section
-    className={`wallet-stack ${drag?.active ? 'reordering' : ''}`}
-    style={drag?.active ? { height: `${126 + Math.max(0, ordered.length - 1) * 76 + 34}px` } : undefined}
-    aria-label="選擇信用卡"
-  >
+  return <section className={`wallet-stack ${drag?.active ? 'reordering' : ''}`} aria-label="選擇信用卡">
     {ordered.map((card, index) => {
       const dragging = drag?.active && drag.cardId === card.id
       const shownIndex = displayIndex(index)
-      const maxTravel = Math.max(76, (ordered.length - 1) * 76)
+      const maxTravel = Math.max(38, (ordered.length - 1) * 38)
       const dy = dragging ? Math.max(-maxTravel, Math.min(maxTravel, drag.currentY - drag.startY)) : 0
 
       return <button
@@ -995,11 +991,9 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
         <div className="card-top"><span>{card.bank || 'CARD'}</span><span>{card.last4 ? `•••• ${card.last4}` : ''}</span></div>
         <div className="card-name">{card.name}</div>
         <div className="card-bottom"><span>REWARDS</span><span>%</span></div>
-        {dragging && <div className="drag-position-badge">第 {drag.targetIndex + 1} 張</div>}
       </button>
     })}
-    {drag?.active && <div className="wallet-drop-slot" style={{ '--target-index': drag.targetIndex }}><span>放到第 {drag.targetIndex + 1} 張</span></div>}
-    {cards.length > 1 && <div className="wallet-reorder-hint">{drag?.active ? '上下拖曳到想要的位置後放開' : '長按卡片後上下拖曳排序'}</div>}
+    {cards.length > 1 && <div className="wallet-reorder-hint">{drag?.active ? '放開即可完成排序' : '長按卡片後上下拖曳排序'}</div>}
   </section>
 }
 
