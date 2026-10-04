@@ -376,120 +376,129 @@ function App() {
   }, [modalOpen])
 
   async function addTransaction(tx) {
-    const { data, error: insertError } = await supabase.from('transactions').insert({
-      user_id: session.user.id,
-      card_id: tx.cardId,
-      transaction_date: tx.date,
-      title: tx.title.trim(),
-      amount: Number(tx.amount),
-      excluded: false,
-    }).select().single()
+    const id = crypto.randomUUID()
+    const updatedAt = new Date().toISOString()
+    const localTx = {
+      id,
+      cardId:tx.cardId,
+      date:tx.date,
+      postedDate:null,
+      title:tx.title.trim(),
+      amount:Number(tx.amount),
+      excluded:false,
+      reconciled:false,
+      programExclusions:[],
+      updatedAt,
+    }
 
-    if (insertError) throw insertError
-    setTransactions(prev => [{
-      id: data.id,
-      cardId: data.card_id,
-      date: data.transaction_date,
-      postedDate: data.posted_date,
-      title: data.title,
-      amount: Number(data.amount),
-      excluded: data.excluded,
-      reconciled: data.reconciled,
-      programExclusions: [],
-    }, ...prev])
+    setTransactions(prev => [localTx, ...prev])
     setShowAddTx(false)
+
+    await queueLocalMutation({
+      entity:'transaction',
+      recordId:id,
+      op:'create',
+      payload:{
+        id,
+        user_id:session.user.id,
+        card_id:tx.cardId,
+        transaction_date:tx.date,
+        posted_date:null,
+        title:tx.title.trim(),
+        amount:Number(tx.amount),
+        excluded:false,
+        reconciled:false,
+        updated_at:updatedAt,
+      },
+      programExclusions:[],
+    })
   }
 
   async function toggleExcluded(txId) {
     const tx = transactions.find(t => t.id === txId)
     if (!tx) return
-    const { error: updateError } = await supabase.from('transactions').update({ excluded: !tx.excluded }).eq('id', txId)
-    if (updateError) {
-      setError(updateError.message)
-      return
-    }
-    setTransactions(prev => prev.map(item => item.id === txId ? { ...item, excluded: !item.excluded } : item))
+    const nextValue = !tx.excluded
+    const updatedAt = new Date().toISOString()
+    const nextTx = { ...tx, excluded:nextValue, updatedAt }
+    setTransactions(prev => prev.map(item => item.id === txId ? nextTx : item))
+
+    await queueLocalMutation({
+      entity:'transaction',
+      recordId:txId,
+      op:'update',
+      baseUpdatedAt:tx.updatedAt || null,
+      payload:toTransactionRow(nextTx, session.user.id),
+      programExclusions:nextTx.programExclusions || [],
+    })
   }
 
   async function toggleReconciled(txId, forceValue) {
     const tx = transactions.find(t => t.id === txId)
     if (!tx) return false
-    const next = typeof forceValue === 'boolean' ? forceValue : !tx.reconciled
-    const { error: updateError } = await supabase.from('transactions').update({ reconciled: next }).eq('id', txId)
-    if (updateError) {
-      setError(updateError.message)
-      return false
-    }
-    setTransactions(prev => prev.map(item => item.id === txId ? { ...item, reconciled: next } : item))
+    const nextValue = typeof forceValue === 'boolean' ? forceValue : !tx.reconciled
+    const updatedAt = new Date().toISOString()
+    const nextTx = { ...tx, reconciled:nextValue, updatedAt }
+    setTransactions(prev => prev.map(item => item.id === txId ? nextTx : item))
+
+    await queueLocalMutation({
+      entity:'transaction',
+      recordId:txId,
+      op:'update',
+      baseUpdatedAt:tx.updatedAt || null,
+      payload:toTransactionRow(nextTx, session.user.id),
+      programExclusions:nextTx.programExclusions || [],
+    })
     return true
   }
 
   async function saveTransactionEdits(payload) {
     const previousTx = transactions.find(item => item.id === payload.id)
-    const optimisticTx = previousTx ? {
+    if (!previousTx) return
+
+    const updatedAt = new Date().toISOString()
+    const nextTx = {
       ...previousTx,
-      cardId: payload.cardId,
-      date: payload.date,
-      postedDate: payload.postedDate || null,
-      title: payload.title.trim(),
-      amount: Number(payload.amount),
-      excluded: payload.excluded,
-      reconciled: payload.reconciled,
-      programExclusions: [...(payload.programExclusions || [])],
-    } : null
-
-    if (optimisticTx) {
-      setTransactions(prev => prev.map(item => item.id === payload.id ? optimisticTx : item))
+      cardId:payload.cardId,
+      date:payload.date,
+      postedDate:payload.postedDate || null,
+      title:payload.title.trim(),
+      amount:Number(payload.amount),
+      excluded:payload.excluded,
+      reconciled:payload.reconciled,
+      programExclusions:[...(payload.programExclusions || [])],
+      updatedAt,
     }
 
-    try {
-      const [{ error: updateError }, { error: clearError }] = await Promise.all([
-        supabase.from('transactions').update({
-          card_id: payload.cardId,
-          transaction_date: payload.date,
-          posted_date: payload.postedDate || null,
-          title: payload.title.trim(),
-          amount: Number(payload.amount),
-          excluded: payload.excluded,
-          reconciled: payload.reconciled,
-        }).eq('id', payload.id),
-        supabase.from('transaction_reward_exclusions').delete().eq('transaction_id', payload.id),
-      ])
-      if (updateError) throw updateError
-      if (clearError) throw clearError
+    setTransactions(prev => prev.map(item => item.id === payload.id ? nextTx : item))
+    setEditingTransaction(null)
 
-      if (payload.programExclusions?.length) {
-        const rows = payload.programExclusions.map(rewardProgramId => ({
-          user_id: session.user.id,
-          transaction_id: payload.id,
-          reward_program_id: rewardProgramId,
-        }))
-        const { error: exclusionError } = await supabase.from('transaction_reward_exclusions').insert(rows)
-        if (exclusionError) throw exclusionError
-      }
-
-      setEditingTransaction(null)
-    } catch (err) {
-      if (previousTx) {
-        setTransactions(prev => prev.map(item => item.id === payload.id ? previousTx : item))
-      }
-      throw err
-    }
+    await queueLocalMutation({
+      entity:'transaction',
+      recordId:payload.id,
+      op:'update',
+      baseUpdatedAt:previousTx.updatedAt || null,
+      payload:toTransactionRow(nextTx, session.user.id),
+      programExclusions:nextTx.programExclusions,
+    })
   }
 
   async function deleteTransaction(txId) {
     const tx = transactions.find(item => item.id === txId)
     if (!tx) return false
     if (undoDelete?.timer) clearTimeout(undoDelete.timer)
+
     setTransactions(prev => prev.filter(item => item.id !== txId))
     const timer = setTimeout(async () => {
-      const { error: deleteError } = await supabase.from('transactions').delete().eq('id', txId)
-      if (deleteError) {
-        setError(deleteError.message)
-        setTransactions(prev => [tx, ...prev])
-      }
+      await queueLocalMutation({
+        entity:'transaction',
+        recordId:txId,
+        op:'delete',
+        baseUpdatedAt:tx.updatedAt || null,
+        payload:null,
+      })
       setUndoDelete(null)
     }, 3500)
+
     setUndoDelete({ tx, timer })
     return true
   }
