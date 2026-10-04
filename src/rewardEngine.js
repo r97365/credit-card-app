@@ -25,9 +25,19 @@ export function calculateCardSummaryRange(card, allTransactions, startDate, endD
     for (const p of m.programs) {
       const existing = programMap.get(p.id)
       if (!existing) {
-        programMap.set(p.id, { ...p, reward: p.reward, eligibleSpend: p.eligibleSpend, cappedMonths: p.capped ? 1 : 0, monthsCount: 1 })
+        programMap.set(p.id, {
+          ...p,
+          reward: p.reward,
+          uncappedReward: p.uncappedReward,
+          lostToCap: p.lostToCap,
+          eligibleSpend: p.eligibleSpend,
+          cappedMonths: p.capped ? 1 : 0,
+          monthsCount: 1
+        })
       } else {
         existing.reward += p.reward
+        existing.uncappedReward += p.uncappedReward
+        existing.lostToCap += p.lostToCap
         existing.eligibleSpend += p.eligibleSpend
         existing.cappedMonths += p.capped ? 1 : 0
         existing.monthsCount += 1
@@ -84,9 +94,16 @@ function calculateProgram(program, eligibleTxs) {
   if (program.calcMode === 'per_transaction') {
     let remainingSpendCap = program.spendCap ?? Infinity
     reward = txs.reduce((acc, tx) => {
-      const amount = Math.max(0, Math.min(tx.amount, remainingSpendCap))
-      remainingSpendCap -= amount
-      return acc + roundMoney(amount * program.rate / 100, program.rounding)
+      const amount = Number(tx.amount || 0)
+      if (amount < 0) {
+        if (Number.isFinite(remainingSpendCap) && program.spendCap != null) {
+          remainingSpendCap = Math.min(program.spendCap, remainingSpendCap + Math.abs(amount))
+        }
+        return acc + roundMoney(amount * program.rate / 100, program.rounding)
+      }
+      const rewardedAmount = Math.max(0, Math.min(amount, remainingSpendCap))
+      remainingSpendCap -= rewardedAmount
+      return acc + roundMoney(rewardedAmount * program.rate / 100, program.rounding)
     }, 0)
   } else {
     reward = roundMoney(eligibleSpend * program.rate / 100, program.rounding)
@@ -94,17 +111,21 @@ function calculateProgram(program, eligibleTxs) {
 
   const uncappedReward = reward
   if (program.rewardCap != null) reward = Math.min(reward, program.rewardCap)
+  const lostToCap = Math.max(0, uncappedReward - reward)
 
   return {
     ...program,
     eligibleSpend,
     reward,
+    uncappedReward,
+    lostToCap,
     capped: program.rewardCap != null && uncappedReward >= program.rewardCap,
   }
 }
 
 function roundMoney(value, mode) {
-  return mode === 'round' ? Math.round(value) : Math.floor(value)
+  if (mode === 'round') return Math.round(value)
+  return value >= 0 ? Math.floor(value) : Math.ceil(value)
 }
 
 function isProgramActiveForMonth(program, month) {
