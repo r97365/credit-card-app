@@ -321,14 +321,21 @@ function AuthScreen({ configError }) {
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState(configError || '')
 
   async function submit(e) {
     e.preventDefault()
     if (!supabase) return
-    setBusy(true)
     setMessage('')
+    if (mode === 'signup' && password !== confirmPassword) {
+      setMessage('兩次輸入的密碼不一致。')
+      return
+    }
+    setBusy(true)
     if (mode === 'login') {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) setMessage(error.message)
@@ -353,12 +360,30 @@ function AuthScreen({ configError }) {
     <p>信用卡、回饋活動與刷卡紀錄會同步到 Supabase，不再只存在單一手機。</p>
     <form className="auth-card" onSubmit={submit}>
       <label>Email<input type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="name@example.com" /></label>
-      <label>密碼<input type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={6} required value={password} onChange={e => setPassword(e.target.value)} placeholder="至少 6 碼" /></label>
+      <label>密碼
+        <div className="password-field">
+          <input type={showPassword ? 'text' : 'password'} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={6} required value={password} onChange={e => setPassword(e.target.value)} placeholder="至少 6 碼" />
+          <button type="button" className="password-eye" aria-label={showPassword ? '隱藏密碼' : '顯示密碼'} onClick={() => setShowPassword(v => !v)}><EyeIcon open={showPassword} /></button>
+        </div>
+      </label>
+      {mode === 'signup' && <label>再次確認密碼
+        <div className="password-field">
+          <input type={showConfirmPassword ? 'text' : 'password'} autoComplete="new-password" minLength={6} required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="再輸入一次密碼" />
+          <button type="button" className="password-eye" aria-label={showConfirmPassword ? '隱藏密碼' : '顯示密碼'} onClick={() => setShowConfirmPassword(v => !v)}><EyeIcon open={showConfirmPassword} /></button>
+        </div>
+        {confirmPassword && password !== confirmPassword && <div className="password-mismatch">兩次密碼不一致</div>}
+      </label>}
       {message && <div className="auth-message">{message}</div>}
-      <button className="primary-btn" disabled={busy}>{busy ? '處理中…' : mode === 'login' ? '登入' : '註冊'}</button>
+      <button className="primary-btn" disabled={busy || (mode === 'signup' && (!confirmPassword || password !== confirmPassword))}>{busy ? '處理中…' : mode === 'login' ? '登入' : '註冊'}</button>
     </form>
-    <button className="auth-switch" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage('') }}>{mode === 'login' ? '第一次使用？建立帳號' : '已經有帳號？登入'}</button>
+    <button className="auth-switch" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setConfirmPassword(''); setShowPassword(false); setShowConfirmPassword(false); setMessage('') }}>{mode === 'login' ? '第一次使用？建立帳號' : '已經有帳號？登入'}</button>
   </div>
+}
+
+function EyeIcon({ open }) {
+  return open
+    ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18M10.6 10.7a2 2 0 002.7 2.7M9.9 4.2A10.8 10.8 0 0112 4c5.5 0 9 5 9 5a17 17 0 01-2.5 3M6.6 6.6C4.2 8.2 3 10 3 10s3.5 5 9 5c1.4 0 2.7-.3 3.8-.8" /></svg>
+    : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.5-5 9-5 9 5 9 5-3.5 5-9 5-9-5-9-5z"/><circle cx="12" cy="12" r="2.5"/></svg>
 }
 
 function EmptyCards({ onAdd }) {
