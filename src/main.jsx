@@ -4,6 +4,8 @@ import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 
+const APP_VERSION = '0.2.1'
+
 const PALETTES = [
   ['#222831','#38414d'],
   ['#193f32','#2e6654'],
@@ -238,7 +240,6 @@ function App() {
       programExclusions: [...(payload.programExclusions || [])],
     } : item))
     setEditingTransaction(null)
-    loadData().catch(err => setError(err.message))
   }
 
   async function deleteTransaction(txId) {
@@ -510,7 +511,7 @@ function App() {
       {editingTransaction && <TransactionEditor tx={editingTransaction} cards={activeCards} onClose={() => setEditingTransaction(null)} onSave={saveTransactionEdits} />}
       {showCardEditor && <CardEditor card={creatingCard ? null : selectedCard} onClose={() => { setShowCardEditor(false); setCreatingCard(false) }} onSaveCard={saveCard} onSaveProgram={saveProgram} onDeleteProgram={deleteProgram} onArchiveCard={archiveCard} onDuplicatePrograms={duplicateProgramsToNextPeriod} />}
       {showStats && <StatsSheet cards={activeCards} transactions={transactions} month={month} onClose={() => setShowStats(false)} />}
-      {showSettings && <AccountSheet email={session.user.email} cards={cards} selectedCard={selectedCard} onClose={() => setShowSettings(false)} onAddCard={() => { setShowSettings(false); setCreatingCard(true); setShowCardEditor(true) }} onEditCard={() => { setShowSettings(false); if(selectedCard) { setCreatingCard(false); setShowCardEditor(true) } }} onRestoreCard={restoreCard} onSignOut={signOut} />}
+      {showSettings && <AccountSheet version={APP_VERSION} email={session.user.email} cards={cards} selectedCard={selectedCard} onClose={() => setShowSettings(false)} onAddCard={() => { setShowSettings(false); setCreatingCard(true); setShowCardEditor(true) }} onEditCard={() => { setShowSettings(false); if(selectedCard) { setCreatingCard(false); setShowCardEditor(true) } }} onRestoreCard={restoreCard} onSignOut={signOut} />}
       {undoDelete && <div className="undo-toast"><span>已刪除「{undoDelete.tx.title}」</span><button onClick={undoTransactionDelete}>復原</button></div>}
     </div>
   )
@@ -993,7 +994,7 @@ function ProgramEditor({ value, onCancel, onSave }) {
   </div>
 }
 
-function AccountSheet({ email, cards, selectedCard, onClose, onAddCard, onEditCard, onRestoreCard, onSignOut }) {
+function AccountSheet({ version, email, cards, selectedCard, onClose, onAddCard, onEditCard, onRestoreCard, onSignOut }) {
   const archived = cards.filter(c => c.archived)
 
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
@@ -1005,6 +1006,7 @@ function AccountSheet({ email, cards, selectedCard, onClose, onAddCard, onEditCa
       <div className="field-label">已封存</div>
       <div className="archived-list">{archived.map(card => <div className="archived-card" key={card.id}><span>{card.name}</span><button onClick={async()=>{try{await onRestoreCard(card.id)}catch(e){alert(e.message)}}}>恢復</button></div>)}</div>
     </>}
+    <div className="app-version">Card Rewards v{version}</div>
     <button className="settings-action danger-text" onClick={onSignOut}>登出</button>
   </div></div>
 }
