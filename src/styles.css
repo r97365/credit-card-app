@@ -423,3 +423,61 @@ h2,h3{margin:0}
 .wallet-card.selected{
   outline:1px solid rgba(255,255,255,.08);
 }
+
+/* v0.2.9: Wallet-like expanded reorder mode */
+.wallet-stack.reordering .wallet-card{
+  transform:translateY(calc(var(--stack-index) * 60px)) scale(.985);
+  transition:transform .16s cubic-bezier(.2,.8,.2,1), box-shadow .16s ease, opacity .16s ease;
+}
+.wallet-stack.reordering .wallet-card:not(.dragging-card){
+  opacity:.94;
+}
+.wallet-card.dragging-card{
+  transform:translateY(calc(var(--drag-origin-index) * 60px + var(--drag-y))) scale(1.035) !important;
+  z-index:60 !important;
+  box-shadow:0 34px 88px rgba(0,0,0,.58);
+}
+.drag-position-badge{
+  position:absolute;
+  right:18px;
+  top:18px;
+  z-index:4;
+  background:rgba(15,17,21,.72);
+  border:1px solid rgba(255,255,255,.13);
+  backdrop-filter:blur(12px);
+  color:#f2eee5;
+  border-radius:999px;
+  padding:6px 9px;
+  font-size:11px;
+  font-weight:800;
+}
+.wallet-drop-slot{
+  position:absolute;
+  left:8px;
+  right:8px;
+  top:calc(var(--target-index) * 60px + 8px);
+  height:174px;
+  border:1.5px dashed rgba(214,185,120,.65);
+  border-radius:25px;
+  background:rgba(214,185,120,.055);
+  z-index:0;
+  pointer-events:none;
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  padding-bottom:10px;
+  box-sizing:border-box;
+  transition:top .15s cubic-bezier(.2,.8,.2,1);
+}
+.wallet-drop-slot span{
+  background:#26231d;
+  color:#dfc98f;
+  border-radius:999px;
+  padding:5px 9px;
+  font-size:10px;
+  font-weight:700;
+}
+.wallet-stack.reordering .wallet-reorder-hint{
+  color:#b8a97f;
+  font-weight:650;
+}
