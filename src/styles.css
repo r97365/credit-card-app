@@ -125,3 +125,10 @@ h2,h3{margin:0}
 .settings-action{width:100%;text-align:left;border:0;background:#101317;color:#fff;border-radius:14px;padding:14px;margin-top:8px}.danger-text{color:#e09a9a}
 .bottom-nav .add-main:disabled{opacity:.35;cursor:default}
 @media(max-width:380px){.two-col{grid-template-columns:1fr}.reward-preview{align-items:flex-start;flex-direction:column}}
+
+.password-field{position:relative}
+.password-field input{padding-right:48px}
+.password-eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:36px;height:36px;border:0;background:transparent;color:#9aa1aa;display:grid;place-items:center;border-radius:10px}
+.password-eye:hover{background:rgba(255,255,255,.04);color:#e7e8ea}
+.password-eye svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.password-mismatch{margin-top:6px;color:#dc9696;font-size:11px}
