@@ -1629,36 +1629,194 @@ function CardListSheet({ cards, onClose, onChoose, onAdd }) {
   </div></div>
 }
 
-function SyncSheet({ online, pending, conflicts, busy, snapshotSavedAt, onClose, onSync, onResolve }) {
-  return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
+function SyncSheet({ online, pending, conflicts, cards, busy, snapshotSavedAt, onClose, onSync, onInspect, onResolve }) {
+  const [expandedId, setExpandedId] = useState(null)
+  const [inspectingId, setInspectingId] = useState(null)
+  const [confirmChoice, setConfirmChoice] = useState(null)
+  const [detailError, setDetailError] = useState('')
+
+  async function toggleDetails(conflict) {
+    setConfirmChoice(null)
+    setDetailError('')
+    if (expandedId === conflict.id) {
+      setExpandedId(null)
+      return
+    }
+    setExpandedId(conflict.id)
+    if (!online) return
+    await refreshDetails(conflict)
+  }
+
+  async function refreshDetails(conflict) {
+    if (!online) return
+    setInspectingId(conflict.id)
+    setDetailError('')
+    setConfirmChoice(null)
+    try {
+      await onInspect(conflict)
+    } catch (err) {
+      setDetailError(err.message || '取得雲端資料失敗，請稍後再試。')
+    } finally {
+      setInspectingId(null)
+    }
+  }
+
+  async function confirmResolve(conflict) {
+    if (!confirmChoice || busy) return
+    setDetailError('')
+    try {
+      await onResolve(conflict, confirmChoice.choice)
+      setExpandedId(null)
+      setConfirmChoice(null)
+    } catch (err) {
+      setDetailError(err.message || '解決衝突失敗，請稍後重試。')
+      setConfirmChoice(null)
+    }
+  }
+
+  return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall sync-sheet" onMouseDown={e=>e.stopPropagation()}>
     <SheetGrabber onClose={onClose} />
     <div className="sheet-title-row"><h3>同步狀態</h3><button className="close-btn" onClick={onClose}>×</button></div>
 
     <div className={`sync-status-card ${online ? 'online' : 'offline'}`}>
       <strong>{online ? '已連線' : '目前離線'}</strong>
-      <span>{online ? (pending ? `${pending} 筆變更等待同步` : '所有變更都已同步') : '變更會先安全存放在這台裝置。'}</span>
+      <span>{online
+        ? conflicts.length ? `${conflicts.length} 筆需要確認，${pending} 筆變更待處理` : pending ? `${pending} 筆變更等待同步` : '所有變更都已同步'
+        : '變更會先保存在這台裝置，連線後再同步。'}</span>
       {snapshotSavedAt && <small>本機快取：{formatSyncTime(snapshotSavedAt)}</small>}
     </div>
 
     {conflicts.length > 0 && <>
-      <div className="field-label">需要你決定的同步衝突</div>
+      <div className="field-label">需要你決定的同步衝突（{conflicts.length} 筆）</div>
+      <p className="sync-conflict-intro">每一筆都可以查看是哪筆資料、哪些欄位不同。確認後才會採用你選的版本，不會自動覆蓋。</p>
       <div className="conflict-list">
-        {conflicts.map(conflict => <div className="conflict-item" key={conflict.id}>
-          <div>
-            <strong>{syncEntityLabel(conflict.entity)}</strong>
-            <span>這筆資料在另一台裝置也被修改過。</span>
+        {conflicts.map(conflict => {
+          const expanded = expandedId === conflict.id
+          const fields = comparisonFields(conflict, cards)
+          const changedCount = fields.filter(field => field.different).length
+          const canChoose = online && !busy && !inspectingId && !!conflict.inspectedAt && !detailError
+          const localTime = conflict.localPayload?.updated_at
+          const cloudTime = conflict.remotePayload?.updated_at
+          return <div className="conflict-item" key={conflict.id}>
+            <button className="conflict-summary" onClick={() => toggleDetails(conflict)} aria-expanded={expanded}>
+              <span className="conflict-summary-main">
+                <small>{syncEntityLabel(conflict.entity)}</small>
+                <strong>{conflictRecordName(conflict, cards)}</strong>
+                <span>{conflict.op === 'delete' ? '本機有待同步的刪除操作' : '本機與雲端存在不同版本'}</span>
+              </span>
+              <span className="conflict-expand-icon">{expanded ? '⌃' : '⌄'}</span>
+            </button>
+
+            {expanded && <div className="conflict-details">
+              {inspectingId === conflict.id
+                ? <div className="conflict-fetching">正在確認雲端最新資料…</div>
+                : <div className="conflict-detail-heading">
+                    <span>{changedCount ? `${changedCount} 個欄位不同` : '欄位內容相同，請確認是否仍要處理'}</span>
+                    {online && <button disabled={busy} onClick={() => refreshDetails(conflict)}>重新比對 <span aria-hidden="true">↻</span></button>}
+                  </div>}
+              {!online && <div className="conflict-info-warning">目前離線，這是上次取得的雲端版本；連線後才能做最後選擇。</div>}
+              {online && !conflict.inspectedAt && inspectingId !== conflict.id && <div className="conflict-info-warning">尚未取得最新雲端資料，請點「重新比對」。</div>}
+              <div className="conflict-versions">
+                <div><b>本機版本</b><span>{localTime ? formatSyncTime(localTime) : '待同步'}</span></div>
+                <div><b>雲端版本</b><span>{cloudTime ? formatSyncTime(cloudTime) : '無版本時間'}</span></div>
+              </div>
+              {conflict.op === 'delete' && <div className="conflict-delete-note">本機操作：刪除這筆資料。選擇「保留本機」將執行刪除。</div>}
+              {!conflict.remotePayload && <div className="conflict-delete-note">目前雲端已沒有這筆資料。選擇保留本機可能重新建立它。</div>}
+              <div className="conflict-diff-list">
+                {fields.map(field => <div className={`conflict-diff-row ${field.different ? 'changed' : ''}`} key={field.key}>
+                  <div className="conflict-field-label">{field.label}{field.different && <span>不同</span>}</div>
+                  <div className="conflict-value-pair">
+                    <div className="local-value">{field.local}</div>
+                    <div className="cloud-value">{field.remote}</div>
+                  </div>
+                </div>)}
+              </div>
+              {expandedId === conflict.id && detailError && <div className="conflict-detail-error">{detailError}</div>}
+              <div className="conflict-actions">
+                <button disabled={!canChoose} onClick={() => setConfirmChoice({ id:conflict.id, choice:'remote' })}>採用雲端</button>
+                <button disabled={!canChoose} className="primary-choice" onClick={() => setConfirmChoice({ id:conflict.id, choice:'local' })}>保留本機</button>
+              </div>
+              {confirmChoice?.id === conflict.id && <div className="conflict-confirm">
+                <strong>確定要{confirmChoice.choice === 'local' ? '保留本機版本' : '採用雲端版本'}？</strong>
+                <p>{confirmChoice.choice === 'local'
+                  ? '本機這筆待同步的修改會寫到雲端，取代雲端同一筆資料。'
+                  : '這筆本機待同步操作會被取消，改以雲端版本為準。'}</p>
+                <div className="conflict-confirm-actions">
+                  <button onClick={() => setConfirmChoice(null)}>再想想</button>
+                  <button disabled={!canChoose} onClick={() => confirmResolve(conflict)}>確認套用</button>
+                </div>
+              </div>}
+            </div>}
           </div>
-          <div className="conflict-actions">
-            <button disabled={!online || busy} onClick={() => onResolve(conflict, 'remote')}>採用雲端</button>
-            <button disabled={!online || busy} className="primary-choice" onClick={() => onResolve(conflict, 'local')}>保留本機</button>
-          </div>
-        </div>)}
+        })}
       </div>
     </>}
 
     <button className="primary-btn" disabled={!online || busy} onClick={onSync}>{busy ? '同步中…' : '立即同步'}</button>
     {!online && <div className="sync-note">恢復網路後，App 會在回到前景時自動重試。</div>}
   </div></div>
+}
+
+function conflictRecordName(conflict, cards) {
+  const row = conflict.localPayload || conflict.remotePayload || {}
+  const card = cards.find(item => item.id === row.card_id)
+  const cardName = card?.name || (row.card_id ? `卡片 ${String(row.card_id).slice(0,8)}` : '')
+  if (conflict.entity === 'transaction') {
+    return [cardName, row.title || '未命名刷卡', row.amount == null ? '' : formatMoney(Number(row.amount))].filter(Boolean).join(' · ')
+  }
+  if (conflict.entity === 'program') return [cardName, row.name || '未命名回饋活動'].filter(Boolean).join(' · ')
+  if (conflict.entity === 'card') return row.name || '未命名信用卡'
+  return '需要確認的資料'
+}
+
+function comparisonFields(conflict, cards) {
+  const fieldsByEntity = {
+    transaction: [
+      ['card_id','信用卡'], ['transaction_date','交易日'], ['posted_date','入帳日'],
+      ['title','刷卡項目'], ['amount','金額'], ['excluded','整筆排除回饋'],
+      ['reconciled','已核對帳單'], ['programExclusions','指定排除的活動'],
+    ],
+    card: [
+      ['name','卡片名稱'], ['bank','銀行'], ['last4','末四碼'], ['monthly_spend_limit','月刷卡控制上限'],
+      ['tip','卡片 Tip'], ['reward_date_basis','回饋認列日期'], ['sort_order','排序／封存'],
+      ['color_a','卡面底色'], ['color_b','卡面漸層色'],
+    ],
+    program: [
+      ['card_id','信用卡'], ['name','活動名稱'], ['rate','回饋比例'],
+      ['reward_cap','回饋金上限'], ['spend_cap','消費金額上限'],
+      ['calc_mode','計算方式'], ['rounding','小數處理'],
+      ['start_date','開始日期'], ['end_date','結束日期'],
+    ],
+  }
+  const list = fieldsByEntity[conflict.entity] || []
+  const localRow = conflict.op === 'delete' ? null : conflict.localPayload
+  const remoteRow = conflict.remotePayload
+  return list.map(([key,label]) => {
+    const localRaw = key === 'programExclusions' ? conflict.programExclusions : localRow?.[key]
+    const remoteRaw = key === 'programExclusions' ? conflict.remoteProgramExclusions : remoteRow?.[key]
+    const local = !localRow ? '已刪除' : conflictValue(key, localRaw, cards)
+    const remote = !remoteRow ? '雲端不存在' : conflictValue(key, remoteRaw, cards)
+    return { key, label, local, remote, different:local !== remote }
+  }).sort((a,b) => Number(b.different) - Number(a.different))
+}
+
+function conflictValue(key, value, cards) {
+  if (value == null || value === '') return key === 'programExclusions' && value === undefined ? '資料尚未取得' : '未設定'
+  if (key === 'card_id') return cards.find(c => c.id === value)?.name || `卡片 ${String(value).slice(0,8)}`
+  if (key === 'programExclusions') {
+    if (!Array.isArray(value)) return '資料尚未取得'
+    if (!value.length) return '無'
+    return value.map(id => cards.flatMap(c => c.rewardPrograms || []).find(p => p.id === id)?.name || `活動 ${String(id).slice(0,8)}`).sort().join('、')
+  }
+  if (['amount','monthly_spend_limit','reward_cap','spend_cap'].includes(key)) return formatMoney(Number(value))
+  if (key === 'rate') return `${Number(value)}%`
+  if (key === 'excluded' || key === 'reconciled') return value === true || value === 'true' ? '是' : '否'
+  if (key === 'reward_date_basis') return value === 'posted' ? '入帳日' : '交易日'
+  if (key === 'calc_mode') return value === 'per_transaction' ? '每筆分別計算' : '每月合併計算'
+  if (key === 'rounding') return value === 'round' ? '四捨五入' : '無條件捨去'
+  if (key === 'sort_order') return Number(value) < 0 ? '已封存' : `第 ${Number(value)+1} 張`
+  if (['transaction_date','posted_date','start_date','end_date'].includes(key)) return String(value).replaceAll('-','/')
+  return String(value)
 }
 
 function StatsSheet({ cards, transactions, month, onClose }) {
