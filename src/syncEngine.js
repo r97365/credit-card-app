@@ -37,6 +37,31 @@ async function getRemoteRow(entity, recordId) {
   return data || null
 }
 
+const TRACKED_FIELDS = {
+  transaction:['card_id','transaction_date','posted_date','title','amount','excluded','reconciled'],
+  card:['name','bank','last4','color_a','color_b','monthly_spend_limit','tip','reward_date_basis','sort_order'],
+  program:['card_id','name','rate','reward_cap','spend_cap','calc_mode','rounding','start_date','end_date'],
+}
+
+const NUMERIC_FIELDS = new Set(['amount','monthly_spend_limit','sort_order','rate','reward_cap','spend_cap'])
+
+function equalField(field, a, b) {
+  if (a == null || a === '') return b == null || b === ''
+  if (b == null || b === '') return false
+  if (NUMERIC_FIELDS.has(field)) return Number(a) === Number(b)
+  return String(a) === String(b)
+}
+
+function sameRecordValues(entity, a, b) {
+  if (!a || !b) return a == null && b == null
+  return (TRACKED_FIELDS[entity] || []).every(field => equalField(field, a[field], b[field]))
+}
+
+function sameIdList(a,b) {
+  return Array.isArray(a) && Array.isArray(b) &&
+    a.length === b.length && [...a].sort().every((v,i) => v === [...b].sort()[i])
+}
+
 async function readRemoteExclusions(entity, recordId) {
   if (entity !== 'transaction') return undefined
   const { data, error } = await supabase
@@ -68,7 +93,15 @@ async function applyMutation(mutation, { force = false } = {}) {
   if (!force && mutation.op !== 'create' && mutation.entity !== 'exclusion' && mutation.baseUpdatedAt) {
     const remote = await getRemoteRow(mutation.entity, mutation.recordId)
     if (remote?.updated_at && !sameTimestamp(remote.updated_at, mutation.baseUpdatedAt)) {
-      return { conflict:true, remote }
+      // Two devices may submit the same content; those changes are not conflicts.
+      const remoteExclusions = await readRemoteExclusions(mutation.entity, mutation.recordId)
+      const exclusionsAgree = mutation.entity !== 'transaction' ||
+        (Array.isArray(mutation.programExclusions) &&
+          sameIdList(remoteExclusions, mutation.programExclusions))
+      if (sameRecordValues(mutation.entity, mutation.payload, remote) && exclusionsAgree) {
+        return { alreadyApplied:true }
+      }
+      return { conflict:true, remote, remoteProgramExclusions:remoteExclusions }
     }
   }
 
@@ -135,7 +168,7 @@ export async function flushMutationQueue(userId) {
           mutationId:mutation.id,
           localPayload:mutation.payload,
           remotePayload:result.remote,
-          remoteProgramExclusions:await readRemoteExclusions(mutation.entity, mutation.recordId),
+          remoteProgramExclusions:result.remoteProgramExclusions,
           op:mutation.op,
           baseUpdatedAt:mutation.baseUpdatedAt,
           programExclusions:mutation.programExclusions,
@@ -160,16 +193,23 @@ export async function flushMutationQueue(userId) {
 export async function resolveConflict(userId, conflict, choice) {
   if (!userId || !navigator.onLine) throw new Error('請連線後再選擇要保留的版本。')
   if (choice !== 'local' && choice !== 'remote') throw new Error('未知的同步選項。')
+  if (!conflict.inspectedAt) throw new Error('請先展開並取得最新雲端資料，再決定保留哪個版本。')
 
-  // Guard against overwriting another change made after the user opened the comparison.
+  // Protect the comparison from becoming stale while the person is deciding.
   const current = await getRemoteRow(conflict.entity, conflict.recordId)
   const seen = conflict.remotePayload
+  const currentExclusions = await readRemoteExclusions(conflict.entity, conflict.recordId)
   const remoteChanged = Boolean(current) !== Boolean(seen) ||
-    (current && seen && !sameTimestamp(current.updated_at, seen.updated_at))
+    (current && seen && (
+      !sameTimestamp(current.updated_at, seen.updated_at) ||
+      !sameRecordValues(conflict.entity, current, seen)
+    )) ||
+    (conflict.entity === 'transaction' &&
+      !sameIdList(currentExclusions, conflict.remoteProgramExclusions))
 
   if (remoteChanged) {
     await inspectSyncConflict(userId, conflict)
-    const error = new Error('雲端資料在比較期間又有更新，請重新查看差異再決定。')
+    const error = new Error('雲端資料在你查看後又有變更，請再確認最新內容。')
     error.code = 'REMOTE_CHANGED'
     throw error
   }
