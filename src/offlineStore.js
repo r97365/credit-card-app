@@ -149,14 +149,19 @@ export async function saveConflict(userId, conflict) {
   const tx = db.transaction(CONFLICTS, 'readwrite')
   const store = tx.objectStore(CONFLICTS)
   const rows = await requestResult(store.index('userId').getAll(userId))
+  const previous = rows.find(row => row.entity === conflict.entity && row.recordId === conflict.recordId)
   for (const row of rows) {
     if (row.entity === conflict.entity && row.recordId === conflict.recordId) store.delete(row.id)
   }
+  const remoteUnchanged = previous &&
+    JSON.stringify(previous.remotePayload) === JSON.stringify(conflict.remotePayload) &&
+    JSON.stringify(previous.remoteProgramExclusions) === JSON.stringify(conflict.remoteProgramExclusions)
   const next = {
     ...conflict,
-    id: conflict.id || crypto.randomUUID(),
+    id: conflict.id || previous?.id || crypto.randomUUID(),
     userId,
-    createdAt: new Date().toISOString(),
+    inspectedAt:conflict.inspectedAt || (remoteUnchanged ? previous?.inspectedAt : null),
+    createdAt:previous?.createdAt || new Date().toISOString(),
   }
   store.put(next)
   await txDone(tx)
