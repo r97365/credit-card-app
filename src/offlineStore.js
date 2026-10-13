@@ -180,3 +180,16 @@ export async function removeConflict(id) {
   await txDone(tx)
   db.close()
 }
+
+
+export async function removeConflictsForRecord(userId, entity, recordId) {
+  const db = await openDb()
+  const tx = db.transaction(CONFLICTS, 'readwrite')
+  const store = tx.objectStore(CONFLICTS)
+  const rows = await requestResult(store.index('userId').getAll(userId))
+  for (const row of rows || []) {
+    if (row.entity === entity && row.recordId === recordId) store.delete(row.id)
+  }
+  await txDone(tx)
+  db.close()
+}
