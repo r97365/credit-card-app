@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#0b0c0f" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <style>
@@ -10,6 +10,14 @@
       #boot-fallback{position:fixed;inset:0;display:grid;place-items:center;background:#0b0c0f;color:#8d949d;font-size:14px;letter-spacing:.02em}
       #root:not(:empty)+#boot-fallback{display:none}
     </style>
+    <script>
+      // Keep the installed iPhone web app behaving like a native app: no pinch zoom.
+      document.addEventListener('gesturestart', function (event) { event.preventDefault() }, { passive:false })
+      document.addEventListener('gesturechange', function (event) { event.preventDefault() }, { passive:false })
+      document.addEventListener('touchmove', function (event) {
+        if (event.touches && event.touches.length > 1) event.preventDefault()
+      }, { passive:false })
+    </script>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <title>Card Rewards</title>
