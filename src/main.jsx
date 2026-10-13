@@ -6,7 +6,7 @@ import { supabase } from './supabase'
 import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations } from './offlineStore'
 import { flushMutationQueue, resolveConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.4.2'
+const APP_VERSION = '0.4.3'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
