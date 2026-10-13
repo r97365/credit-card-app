@@ -5,6 +5,7 @@ import {
   saveConflict,
   getConflicts,
   removeConflict,
+  removeConflictsForRecord,
 } from './offlineStore'
 
 const TABLES = {
@@ -18,6 +19,14 @@ function isProbablyOffline(error) {
   if (!navigator.onLine) return true
   const message = String(error?.message || error || '').toLowerCase()
   return message.includes('fetch') || message.includes('network') || message.includes('failed to fetch')
+}
+
+function sameTimestamp(a, b) {
+  if (!a || !b) return false
+  const ta = Date.parse(a)
+  const tb = Date.parse(b)
+  if (!Number.isFinite(ta) || !Number.isFinite(tb)) return String(a) === String(b)
+  return Math.abs(ta - tb) <= 5
 }
 
 async function getRemoteRow(entity, recordId) {
@@ -34,7 +43,7 @@ async function applyMutation(mutation, { force = false } = {}) {
 
   if (!force && mutation.op !== 'create' && mutation.entity !== 'exclusion' && mutation.baseUpdatedAt) {
     const remote = await getRemoteRow(mutation.entity, mutation.recordId)
-    if (remote?.updated_at && remote.updated_at !== mutation.baseUpdatedAt) {
+    if (remote?.updated_at && !sameTimestamp(remote.updated_at, mutation.baseUpdatedAt)) {
       return { conflict:true, remote }
     }
   }
@@ -110,6 +119,7 @@ export async function flushMutationQueue(userId) {
         continue
       }
       await removeMutation(mutation.id)
+      await removeConflictsForRecord(userId, mutation.entity, mutation.recordId)
       synced += 1
     } catch (error) {
       if (isProbablyOffline(error)) {
