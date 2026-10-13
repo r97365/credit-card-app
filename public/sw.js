@@ -1,4 +1,4 @@
-const CACHE_NAME = 'card-rewards-shell-v2'
+const CACHE_NAME = 'card-rewards-shell-v3'
 const APP_URL = self.registration.scope
 
 function sameAppUrl(value) {
