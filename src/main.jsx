@@ -4,9 +4,9 @@ import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations } from './offlineStore'
-import { flushMutationQueue, resolveConflict, loadConflicts, networkError } from './syncEngine'
+import { flushMutationQueue, resolveConflict, inspectSyncConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.4.3'
+const APP_VERSION = '0.4.4'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
@@ -691,15 +691,25 @@ function App() {
     return copies.length
   }
 
+  async function handleInspectConflict(conflict) {
+    if (!session?.user) throw new Error('請先登入，再查看衝突。')
+    const latest = await inspectSyncConflict(session.user.id, conflict)
+    setSyncConflicts(prev => prev.map(item => item.id === latest.id ? latest : item))
+    return latest
+  }
+
   async function handleResolveConflict(conflict, choice) {
-    if (!session?.user || !navigator.onLine) return
+    if (!session?.user || !navigator.onLine) throw new Error('連線後才能解決同步衝突。')
     setSyncBusy(true)
     try {
       await resolveConflict(session.user.id, conflict, choice)
       await refreshSyncStatus()
       await loadData(null, { skipFlush:true })
+      return true
     } catch (e) {
+      await refreshSyncStatus().catch(() => {})
       setError(e.message)
+      throw e
     } finally {
       setSyncBusy(false)
     }
@@ -895,10 +905,12 @@ function App() {
         online={online}
         pending={pendingSync}
         conflicts={syncConflicts}
+        cards={cards}
         busy={syncBusy}
         snapshotSavedAt={snapshotSavedAt}
         onClose={() => setShowSyncSheet(false)}
         onSync={() => syncNow(true)}
+        onInspect={handleInspectConflict}
         onResolve={handleResolveConflict}
       />}
       {undoDelete && <div className="undo-toast"><span>已刪除「{undoDelete.tx.title}」</span><button onClick={undoTransactionDelete}>復原</button></div>}
