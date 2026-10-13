@@ -90,15 +90,21 @@ async function applyMutation(mutation, { force = false } = {}) {
   const table = TABLES[mutation.entity]
   if (!table) throw new Error(`Unknown sync entity: ${mutation.entity}`)
 
-  if (!force && mutation.op !== 'create' && mutation.entity !== 'exclusion' && mutation.baseUpdatedAt) {
+  if (!force && mutation.entity !== 'exclusion') {
     const remote = await getRemoteRow(mutation.entity, mutation.recordId)
-    if (remote?.updated_at && !sameTimestamp(remote.updated_at, mutation.baseUpdatedAt)) {
-      // Two devices may submit the same content; those changes are not conflicts.
+    if (!remote && mutation.op === 'delete') return { alreadyApplied:true }
+    if (!remote && mutation.op === 'update') {
+      // An update to a row deleted on another device must not disappear silently.
+      return { conflict:true, remote:null, remoteProgramExclusions:[] }
+    }
+    if (remote && (mutation.op === 'create' ||
+      (mutation.baseUpdatedAt && !sameTimestamp(remote.updated_at, mutation.baseUpdatedAt)))) {
       const remoteExclusions = await readRemoteExclusions(mutation.entity, mutation.recordId)
       const exclusionsAgree = mutation.entity !== 'transaction' ||
         (Array.isArray(mutation.programExclusions) &&
           sameIdList(remoteExclusions, mutation.programExclusions))
-      if (sameRecordValues(mutation.entity, mutation.payload, remote) && exclusionsAgree) {
+      if (mutation.op !== 'delete' &&
+        sameRecordValues(mutation.entity, mutation.payload, remote) && exclusionsAgree) {
         return { alreadyApplied:true }
       }
       return { conflict:true, remote, remoteProgramExclusions:remoteExclusions }
@@ -220,7 +226,9 @@ export async function resolveConflict(userId, conflict, choice) {
       userId,
       entity:conflict.entity,
       recordId:conflict.recordId,
-      op:conflict.op === 'update' && !current ? 'create' : conflict.op,
+      op:conflict.op === 'update' && !current ? 'create'
+        : conflict.op === 'create' && current ? 'update'
+        : conflict.op,
       payload:conflict.localPayload,
       baseUpdatedAt:conflict.baseUpdatedAt,
       programExclusions:conflict.programExclusions,
