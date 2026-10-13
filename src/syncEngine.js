@@ -37,6 +37,30 @@ async function getRemoteRow(entity, recordId) {
   return data || null
 }
 
+async function readRemoteExclusions(entity, recordId) {
+  if (entity !== 'transaction') return undefined
+  const { data, error } = await supabase
+    .from('transaction_reward_exclusions')
+    .select('reward_program_id')
+    .eq('transaction_id', recordId)
+  if (error) throw error
+  return (data || []).map(x => x.reward_program_id)
+}
+
+export async function inspectSyncConflict(userId, conflict) {
+  if (!userId || !navigator.onLine) throw new Error('目前沒有網路，無法取得雲端最新資料。')
+  const remote = await getRemoteRow(conflict.entity, conflict.recordId)
+  const remoteProgramExclusions = await readRemoteExclusions(conflict.entity, conflict.recordId)
+  const refreshed = {
+    ...conflict,
+    remotePayload:remote,
+    remoteProgramExclusions,
+    inspectedAt:new Date().toISOString(),
+  }
+  await saveConflict(userId, refreshed)
+  return refreshed
+}
+
 async function applyMutation(mutation, { force = false } = {}) {
   const table = TABLES[mutation.entity]
   if (!table) throw new Error(`Unknown sync entity: ${mutation.entity}`)
@@ -111,6 +135,7 @@ export async function flushMutationQueue(userId) {
           mutationId:mutation.id,
           localPayload:mutation.payload,
           remotePayload:result.remote,
+          remoteProgramExclusions:await readRemoteExclusions(mutation.entity, mutation.recordId),
           op:mutation.op,
           baseUpdatedAt:mutation.baseUpdatedAt,
           programExclusions:mutation.programExclusions,
@@ -133,16 +158,32 @@ export async function flushMutationQueue(userId) {
 }
 
 export async function resolveConflict(userId, conflict, choice) {
+  if (!userId || !navigator.onLine) throw new Error('請連線後再選擇要保留的版本。')
+  if (choice !== 'local' && choice !== 'remote') throw new Error('未知的同步選項。')
+
+  // Guard against overwriting another change made after the user opened the comparison.
+  const current = await getRemoteRow(conflict.entity, conflict.recordId)
+  const seen = conflict.remotePayload
+  const remoteChanged = Boolean(current) !== Boolean(seen) ||
+    (current && seen && !sameTimestamp(current.updated_at, seen.updated_at))
+
+  if (remoteChanged) {
+    await inspectSyncConflict(userId, conflict)
+    const error = new Error('雲端資料在比較期間又有更新，請重新查看差異再決定。')
+    error.code = 'REMOTE_CHANGED'
+    throw error
+  }
+
   if (choice === 'local') {
     const mutation = {
-      id: conflict.mutationId,
+      id:conflict.mutationId,
       userId,
-      entity: conflict.entity,
-      recordId: conflict.recordId,
-      op: conflict.op,
-      payload: conflict.localPayload,
-      baseUpdatedAt: conflict.baseUpdatedAt,
-      programExclusions: conflict.programExclusions,
+      entity:conflict.entity,
+      recordId:conflict.recordId,
+      op:conflict.op === 'update' && !current ? 'create' : conflict.op,
+      payload:conflict.localPayload,
+      baseUpdatedAt:conflict.baseUpdatedAt,
+      programExclusions:conflict.programExclusions,
     }
     await applyMutation(mutation, { force:true })
   }
