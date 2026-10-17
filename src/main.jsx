@@ -1538,27 +1538,29 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
   const programEditorRef = React.useRef(null)
   const programNameRef = React.useRef(null)
 
-  function addProgram() {
-    // flushSync mounts the new input before this tap ends, so iOS can show its keyboard.
-    flushSync(() => setProgramEditing({}))
-    programNameRef.current?.focus({ preventScroll:true })
+  function revealProgramEditor() {
     requestAnimationFrame(() => {
       const sheet = sheetRef.current
       const editor = programEditorRef.current
       if (!sheet || !editor) return
-      const desired = editor.offsetTop - sheet.offsetTop - 88
-      sheet.scrollTo({ top:Math.max(0, desired), behavior:'smooth' })
+      const sheetBounds = sheet.getBoundingClientRect()
+      const editorBounds = editor.getBoundingClientRect()
+      const target = sheet.scrollTop + editorBounds.top - sheetBounds.top - 48
+      sheet.scrollTo({ top:Math.max(0, target), behavior:'smooth' })
     })
   }
 
+  function addProgram() {
+    // ReactDOM's flushSync mounts the input within this user's tap for iPhone focus.
+    flushSync(() => setProgramEditing({}))
+    const input = programNameRef.current
+    if (input) input.focus({ preventScroll:true })
+    revealProgramEditor()
+  }
+
   function editProgram(p) {
-    setProgramEditing(p)
-    requestAnimationFrame(() => {
-      const sheet = sheetRef.current
-      const editor = programEditorRef.current
-      if (!sheet || !editor) return
-      sheet.scrollTo({ top:Math.max(0, editor.offsetTop - sheet.offsetTop - 85), behavior:'smooth' })
-    })
+    flushSync(() => setProgramEditing(p))
+    revealProgramEditor()
   }
 
   async function saveCard() {
@@ -1591,6 +1593,17 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
       {!isNew && <>
         <div className="divider" />
         <div className="sheet-title-row"><h3 className="subheading">回饋活動</h3><button className="small-add" onClick={addProgram}>＋ 新增</button></div>
+        {programEditing && <ProgramEditor
+          key={programEditing.id || 'new-program'}
+          value={programEditing}
+          containerRef={programEditorRef}
+          nameInputRef={programNameRef}
+          onCancel={() => setProgramEditing(null)}
+          onSave={async p => {
+            await onSaveProgram(card.id, p)
+            setProgramEditing(null)
+          }}
+        />}
         <button className="duplicate-programs" onClick={async () => {
           try {
             const count = await onDuplicatePrograms(card.id)
@@ -1607,17 +1620,6 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
           </div>)}
           {!card.rewardPrograms.length && <div className="empty-list">尚未建立回饋活動</div>}
         </div>
-        {programEditing && <ProgramEditor
-          key={programEditing.id || 'new-program'}
-          value={programEditing}
-          containerRef={programEditorRef}
-          nameInputRef={programNameRef}
-          onCancel={() => setProgramEditing(null)}
-          onSave={async p => {
-            await onSaveProgram(card.id, p)
-            setProgramEditing(null)
-          }}
-        />}
       </>}
 
       {!isNew && <button className="archive-card-btn" onClick={async () => {
