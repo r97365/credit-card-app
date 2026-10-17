@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { createRoot, flushSync } from 'react-dom/client'
+import { createRoot } from 'react-dom/client'
+import { flushSync } from 'react-dom'
 import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations } from './offlineStore'
 import { flushMutationQueue, resolveConflict, inspectSyncConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.4.5'
+const APP_VERSION = '0.4.6'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
@@ -1147,8 +1148,30 @@ function EmptyCards({ onAdd }) {
 }
 
 function CardStack({ cards, selectedId, onSelect, onReorder }) {
-  const ordered = cards
+  // Selection affects presentation only; dragging is what saves permanent order.
+  const [visualOrderIds, setVisualOrderIds] = useState(null)
+  const ordered = useMemo(() => {
+    if (!visualOrderIds) {
+      const selected = cards.find(card => card.id === selectedId)
+      return selected
+        ? [selected, ...cards.filter(card => card.id !== selectedId)]
+        : cards
+    }
+    const byId = new Map(cards.map(card => [card.id, card]))
+    const listed = visualOrderIds.map(id => byId.get(id)).filter(Boolean)
+    const seen = new Set(listed.map(card => card.id))
+    return [...listed, ...cards.filter(card => !seen.has(card.id))]
+  }, [cards, selectedId, visualOrderIds])
   const [drag, setDrag] = useState(null)
+
+  useEffect(() => {
+    if (!selectedId) return
+    setVisualOrderIds(previous => {
+      const ids = (previous || cards.map(card => card.id)).filter(id => cards.some(card => card.id === id))
+      if (!ids.includes(selectedId) || ids[0] === selectedId) return previous
+      return [selectedId, ...ids.filter(id => id !== selectedId)]
+    })
+  }, [selectedId])
   const dragRef = React.useRef(null)
   const timerRef = React.useRef(null)
 
@@ -1257,12 +1280,11 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
       next.splice(state.targetIndex, 0, moved)
       setDrag(null)
       dragRef.current = null
-      onSelect(moved.id)
+      setVisualOrderIds(next.map(card => card.id))
       await onReorder(next.map(card => card.id))
     } else {
       setDrag(null)
       dragRef.current = null
-      onSelect(cardId)
     }
   }
 
