@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createRoot, flushSync } from 'react-dom/client'
 import './styles.css'
 import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations } from './offlineStore'
 import { flushMutationQueue, resolveConflict, inspectSyncConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.4.4'
+const APP_VERSION = '0.4.5'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
@@ -1512,24 +1512,50 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
   const [basis, setBasis] = useState(card?.rewardDateBasis || 'transaction')
   const [programEditing, setProgramEditing] = useState(null)
   const [busy, setBusy] = useState(false)
+  const sheetRef = React.useRef(null)
+  const programEditorRef = React.useRef(null)
+  const programNameRef = React.useRef(null)
+
+  function addProgram() {
+    // flushSync mounts the new input before this tap ends, so iOS can show its keyboard.
+    flushSync(() => setProgramEditing({}))
+    programNameRef.current?.focus({ preventScroll:true })
+    requestAnimationFrame(() => {
+      const sheet = sheetRef.current
+      const editor = programEditorRef.current
+      if (!sheet || !editor) return
+      const desired = editor.offsetTop - sheet.offsetTop - 88
+      sheet.scrollTo({ top:Math.max(0, desired), behavior:'smooth' })
+    })
+  }
+
+  function editProgram(p) {
+    setProgramEditing(p)
+    requestAnimationFrame(() => {
+      const sheet = sheetRef.current
+      const editor = programEditorRef.current
+      if (!sheet || !editor) return
+      sheet.scrollTo({ top:Math.max(0, editor.offsetTop - sheet.offsetTop - 85), behavior:'smooth' })
+    })
+  }
 
   async function saveCard() {
     setBusy(true)
     try {
       await onSaveCard({ id:card?.id, name, bank, last4, monthlySpendLimit:limit, tip, colors, rewardDateBasis:basis })
-      if (isNew) onClose()
+      onClose()
     } catch (e) { alert(e.message) }
     finally { setBusy(false) }
   }
 
   return <div className="modal-backdrop" onMouseDown={onClose}>
-    <div className="sheet sheet-tall" onMouseDown={e => e.stopPropagation()}>
+    <div className="sheet sheet-tall" ref={sheetRef} onMouseDown={e => e.stopPropagation()}>
       <SheetGrabber onClose={onClose} />
       <div className="sheet-title-row"><h3>{isNew ? '新增信用卡' : '卡片設定'}</h3><button className="close-btn" onClick={onClose}>×</button></div>
       <label>卡片名稱<input value={name} onChange={e => setName(e.target.value)} placeholder="例如：Sport 卡" /></label>
       <div className="two-col">
         <label>銀行<input value={bank} onChange={e => setBank(e.target.value)} placeholder="例如：台新" /></label>
-        <label>末四碼（選填）<input inputMode="numeric" maxLength={4} value={last4} onChange={e => setLast4(e.target.value.replace(/\D/g,'').slice(0,4))} /></label>
+        <label>末四碼（選填）<input inputMode="numeric" maxLength={4} value={last4} onChange={e => setLast4(e.target.value.replace(/\\D/g,'').slice(0,4))} /></label>
       </div>
       <label>每月刷卡總額上限<input inputMode="decimal" value={limit} onChange={e => setLimit(e.target.value)} placeholder="例如：15000" /></label>
       <label>回饋認列日期
@@ -1537,12 +1563,12 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
       </label>
       <label>Tip<textarea value={tip} onChange={e => setTip(e.target.value)} placeholder="只有點 ⓘ 才會顯示" /></label>
       <div className="field-label">卡片樣式</div>
-      <div className="palette-list">{PALETTES.map((p,i) => <button key={i} className={`palette ${colors[0]===p[0]?'chosen':''}`} style={{background:`linear-gradient(135deg,${p[0]},${p[1]})`}} onClick={() => setColors(p)} />)}</div>
+      <div className="palette-list">{PALETTES.map((p,i) => <button key={i} className={`palette ${colors[0]===p[0]?'chosen':''}`} style={{background:`linear-gradient(135deg,${p[0]},${p[1]})`}} onClick={() => setColors(p)} aria-label={`卡片配色 ${i+1}`} />)}</div>
       <button className="primary-btn" disabled={busy || !name.trim()} onClick={saveCard}>{busy ? '儲存中…' : isNew ? '建立卡片' : '儲存卡片設定'}</button>
 
       {!isNew && <>
         <div className="divider" />
-        <div className="sheet-title-row"><h3 className="subheading">回饋活動</h3><button className="small-add" onClick={() => setProgramEditing({})}>＋ 新增</button></div>
+        <div className="sheet-title-row"><h3 className="subheading">回饋活動</h3><button className="small-add" onClick={addProgram}>＋ 新增</button></div>
         <button className="duplicate-programs" onClick={async () => {
           try {
             const count = await onDuplicatePrograms(card.id)
@@ -1551,7 +1577,7 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
         }}>⧉ 複製所有活動到下一期</button>
         <div className="program-settings-list">
           {card.rewardPrograms.map(p => <div className="program-setting" key={p.id}>
-            <button className="program-setting-main" onClick={() => setProgramEditing(p)}>
+            <button className="program-setting-main" onClick={() => editProgram(p)}>
               <strong>{p.name} · {p.rate}%</strong>
               <span>{p.rewardCap != null ? `回饋上限 ${formatMoney(p.rewardCap)}` : p.spendCap != null ? `消費上限 ${formatMoney(p.spendCap)}` : '無上限'} · {p.calcMode === 'monthly_total' ? '整月加總' : '單筆計算'}</span>
             </button>
@@ -1559,6 +1585,17 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
           </div>)}
           {!card.rewardPrograms.length && <div className="empty-list">尚未建立回饋活動</div>}
         </div>
+        {programEditing && <ProgramEditor
+          key={programEditing.id || 'new-program'}
+          value={programEditing}
+          containerRef={programEditorRef}
+          nameInputRef={programNameRef}
+          onCancel={() => setProgramEditing(null)}
+          onSave={async p => {
+            await onSaveProgram(card.id, p)
+            setProgramEditing(null)
+          }}
+        />}
       </>}
 
       {!isNew && <button className="archive-card-btn" onClick={async () => {
@@ -1566,13 +1603,11 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
           try { await onArchiveCard(card.id); onClose() } catch(e){ alert(e.message) }
         }
       }}>封存這張信用卡</button>}
-
-      {programEditing && <ProgramEditor value={programEditing} onCancel={() => setProgramEditing(null)} onSave={async p => { try { await onSaveProgram(card.id,p); setProgramEditing(null) } catch(e){ alert(e.message) } }} />}
     </div>
   </div>
 }
 
-function ProgramEditor({ value, onCancel, onSave }) {
+function ProgramEditor({ value, containerRef, nameInputRef, onCancel, onSave }) {
   const initialCapType = value.rewardCap != null ? 'reward' : value.spendCap != null ? 'spend' : 'none'
   const [name,setName]=useState(value.name || '')
   const [rate,setRate]=useState(value.rate ?? '')
@@ -1582,15 +1617,147 @@ function ProgramEditor({ value, onCancel, onSave }) {
   const [rounding,setRounding]=useState(value.rounding || 'floor')
   const [startDate,setStartDate]=useState(value.startDate || '')
   const [endDate,setEndDate]=useState(value.endDate || '')
-  return <div className="inline-editor">
+  const [saving,setSaving]=useState(false)
+  const rateRef = React.useRef(null)
+  const capRef = React.useRef(null)
+
+  async function saveProgram() {
+    if (saving || !name.trim() || rate === '' || !Number.isFinite(Number(rate)) || Number(rate) < 0) return
+    if (startDate && endDate && endDate < startDate) return
+    setSaving(true)
+    try {
+      await onSave({ ...value, name, rate, capType, capValue, calcMode, rounding, startDate, endDate })
+    } catch (e) {
+      alert(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <div ref={containerRef} className="inline-editor">
     <div className="sheet-title-row"><h4>{value.id ? '編輯回饋活動' : '新增回饋活動'}</h4><button className="close-btn" onClick={onCancel}>×</button></div>
-    <div className="two-col"><label>活動名稱<input value={name} onChange={e=>setName(e.target.value)} placeholder="A / 基本回饋" /></label><label>回饋 %<input inputMode="decimal" value={rate} onChange={e=>setRate(e.target.value)} placeholder="3" /></label></div>
+    <div className="two-col program-main-inputs">
+      <label>活動名稱
+        <input ref={nameInputRef} value={name} onChange={e=>setName(e.target.value)} placeholder="A / 基本回饋"
+          enterKeyHint="next" autoComplete="off"
+          onKeyDown={e=>{ if(e.key==='Enter'){e.preventDefault();rateRef.current?.focus()} }} />
+      </label>
+      <label>回饋 %
+        <input ref={rateRef} inputMode="decimal" enterKeyHint="next" value={rate} onChange={e=>setRate(e.target.value)} placeholder="3"
+          onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();if(capType!=='none')capRef.current?.focus(); else e.currentTarget.blur()}}} />
+      </label>
+    </div>
     <label>上限類型<select value={capType} onChange={e=>setCapType(e.target.value)}><option value="none">無上限</option><option value="reward">回饋金上限</option><option value="spend">消費金額上限</option></select></label>
-    {capType !== 'none' && <label>{capType === 'reward' ? '回饋金上限' : '消費金額上限'}<input inputMode="decimal" value={capValue} onChange={e=>setCapValue(e.target.value)} /></label>}
+    {capType !== 'none' && <label>{capType === 'reward' ? '回饋金上限' : '消費金額上限'}<input ref={capRef} inputMode="decimal" enterKeyHint="done" value={capValue} onChange={e=>setCapValue(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur()}} /></label>}
     <div className="two-col"><label>計算方式<select value={calcMode} onChange={e=>setCalcMode(e.target.value)}><option value="monthly_total">整月加總後計算</option><option value="per_transaction">單項計算再加總</option></select></label><label>小數處理<select value={rounding} onChange={e=>setRounding(e.target.value)}><option value="floor">無條件捨去</option><option value="round">四捨五入</option></select></label></div>
-    <div className="two-col range-date-grid"><label>開始日期<DateField value={startDate} onChange={setStartDate} placeholder="未設定" /></label><label>結束日期<DateField value={endDate} onChange={setEndDate} placeholder="未設定" /></label></div>
-    <button className="primary-btn" disabled={!name.trim() || Number(rate)<0} onClick={() => onSave({ ...value,name,rate,capType,capValue,calcMode,rounding,startDate,endDate })}>儲存回饋活動</button>
+    <ProgramDateRange
+      start={startDate}
+      end={endDate}
+      onChange={(nextStart,nextEnd)=>{setStartDate(nextStart);setEndDate(nextEnd)}}
+    />
+    <button className="primary-btn" disabled={saving || !name.trim() || rate === '' || !Number.isFinite(Number(rate)) || Number(rate)<0 || (startDate && endDate && endDate<startDate)} onClick={saveProgram}>{saving ? '儲存中…' : '儲存回饋活動'}</button>
   </div>
+}
+
+function ProgramDateRange({ start, end, onChange }) {
+  const [open,setOpen] = useState(false)
+  const [viewMonth,setViewMonth] = useState((start || localToday()).slice(0,7))
+  const [draftStart,setDraftStart] = useState(start || '')
+  const [draftEnd,setDraftEnd] = useState(end || '')
+  const [phase,setPhase] = useState('start')
+  const [monthError,setMonthError] = useState('')
+
+  function openPicker() {
+    document.activeElement?.blur?.()
+    setDraftStart('')
+    setDraftEnd('')
+    setViewMonth((start || localToday()).slice(0,7))
+    setPhase('start')
+    setMonthError('')
+    setOpen(true)
+  }
+
+  function pickDay(day) {
+    setMonthError('')
+    if (phase === 'start') {
+      setDraftStart(day)
+      setDraftEnd('')
+      setPhase('end')
+    } else {
+      if (day < draftStart) {
+        setDraftStart(day)
+        setDraftEnd(draftStart)
+      } else {
+        setDraftEnd(day)
+      }
+      setPhase('done')
+    }
+  }
+
+  function commit() {
+    if (!draftStart || !draftEnd) {
+      setMonthError('請先選好開始和結束日期。')
+      return
+    }
+    onChange(draftStart,draftEnd)
+    setOpen(false)
+  }
+
+  const [year,month] = viewMonth.split('-').map(Number)
+  const firstWeekday = new Date(year,month-1,1).getDay()
+  const dayCount = new Date(year,month,0).getDate()
+  const dates = Array.from({length:Math.ceil((firstWeekday+dayCount)/7)*7},(_,index)=>{
+    const number=index-firstWeekday+1
+    return number>=1 && number<=dayCount ? `${viewMonth}-${String(number).padStart(2,'0')}` : null
+  })
+
+  return <div className="program-date-range">
+    <div className="program-date-label">活動期間（選填）</div>
+    <div className="program-date-pair">
+      <button type="button" className="program-date-choice" onClick={openPicker}>
+        <small>開始日期</small><span>{start ? formatDateLong(start) : '選擇日期'}</span>
+      </button>
+      <button type="button" className="program-date-choice" onClick={openPicker}>
+        <small>結束日期</small><span>{end ? formatDateLong(end) : '選擇日期'}</span>
+      </button>
+    </div>
+    {open && <div className="program-calendar">
+      <div className="calendar-top">
+        <button type="button" onClick={()=>setViewMonth(shiftCalendarMonth(viewMonth,-1))} aria-label="上個月">‹</button>
+        <strong>{formatMonthLong(viewMonth)}</strong>
+        <button type="button" onClick={()=>setViewMonth(shiftCalendarMonth(viewMonth,1))} aria-label="下個月">›</button>
+      </div>
+      <div className="calendar-phase">{phase==='start' ? '① 選擇開始日期' : phase==='end' ? '② 接著選擇結束日期' : '✓ 日期選好了，按完成套用'}</div>
+      <div className="calendar-days">
+        {['日','一','二','三','四','五','六'].map(d=><span className="calendar-weekday" key={d}>{d}</span>)}
+        {dates.map((day,i)=>{
+          const between=day && draftStart && draftEnd && day>=draftStart && day<=draftEnd
+          const endpoint=day && (day===draftStart || day===draftEnd)
+          return day ? <button type="button" key={day}
+            className={`calendar-day ${between?'in-range':''} ${endpoint?'range-endpoint':''} ${day===localToday()?'today':''}`}
+            onClick={()=>pickDay(day)}>{Number(day.slice(-2))}</button>
+            : <span key={`blank-${i}`} />
+        })}
+      </div>
+      {monthError && <div className="calendar-validation">{monthError}</div>}
+      <div className="calendar-selected">
+        <span>{draftStart ? formatDateLong(draftStart) : '開始日未選'}</span>
+        <span className="calendar-arrow">→</span>
+        <span>{draftEnd ? formatDateLong(draftEnd) : '結束日未選'}</span>
+      </div>
+      <div className="calendar-actions">
+        <button type="button" onClick={()=>{onChange('','');setOpen(false)}}>清除期間</button>
+        <button type="button" onClick={()=>setOpen(false)}>取消</button>
+        <button type="button" className="calendar-done" disabled={!draftStart || !draftEnd} onClick={commit}>✓ 完成</button>
+      </div>
+    </div>}
+  </div>
+}
+
+function shiftCalendarMonth(month, delta) {
+  const [year, number] = month.split('-').map(Number)
+  const value = new Date(year, number - 1 + delta, 1)
+  return `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}`
 }
 
 function AccountSheet({ version, email, cards, onClose, onOpenCards, onAddCard, onRestoreCard, onSignOut }) {
