@@ -67,7 +67,19 @@ function calculateSummaryFromTransactions(card, txs, month) {
 
   const programs = card.rewardPrograms
     .filter(p => isProgramActiveForMonth(p, month))
-    .map(program => calculateProgram(program, eligibleTxs))
+    .map(program => {
+      // Activity periods are immutable historical windows. A new year's program must
+      // not calculate rewards for an older transaction, even in partial months.
+      const txsInProgram = eligibleTxs.filter(tx => {
+        const recognizedDate = card.rewardDateBasis === 'posted'
+          ? (tx.postedDate || tx.date)
+          : tx.date
+        return recognizedDate &&
+          (!program.startDate || recognizedDate >= program.startDate) &&
+          (!program.endDate || recognizedDate <= program.endDate)
+      })
+      return calculateProgram(program, txsInProgram)
+    })
 
   const totalReward = sum(programs.map(p => p.reward))
   const effectiveRate = totalSpend > 0 ? (totalReward / totalSpend) * 100 : 0
