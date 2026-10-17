@@ -1183,3 +1183,15 @@ textarea{
 .calendar-actions button{flex:1;min-width:0;padding:10px 4px;border:1px solid var(--line);border-radius:10px;background:#252930;color:#d6d8db;font-size:11px}
 .calendar-actions button.calendar-done{background:#eae6dd;color:#131416;font-weight:750;border-color:transparent}
 .calendar-actions button:disabled{opacity:.35}
+
+/* Reward period safety notice */
+.program-date-hint{
+  margin:9px 0 0;
+  padding:9px 10px;
+  border-radius:10px;
+  border:1px solid rgba(217,184,119,.22);
+  color:#bdae8e;
+  background:rgba(217,184,119,.06);
+  font-size:11px;
+  line-height:1.5;
+}
