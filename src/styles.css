@@ -1149,3 +1149,37 @@ textarea{
   background:#ebe1ca;
 }
 .sync-sheet .conflict-confirm-actions button:disabled{opacity:.45}
+
+/* v0.4.5: iPhone reward activity guided input and two-tap date range */
+.inline-editor{scroll-margin-top:72px}
+.program-main-inputs label{min-width:0}
+.program-main-inputs input{min-width:0;width:100%;font-size:16px}
+.program-date-range{margin:16px 0}
+.program-date-label{color:#a9aeb7;font-size:12px;margin-bottom:7px}
+.program-date-pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.program-date-choice{min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:6px;
+ border:1px solid var(--line);border-radius:13px;background:#111419;color:#eceae5;padding:11px 10px;text-align:left}
+.program-date-choice small{font-size:11px;color:#939ba6}
+.program-date-choice span{font-size:13px;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.program-calendar{margin-top:12px;padding:13px 10px 12px;background:#151a20;
+ border:1px solid rgba(225,213,186,.16);border-radius:17px}
+.calendar-top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.calendar-top strong{font-size:15px}
+.calendar-top button{width:37px;height:37px;border:1px solid var(--line);border-radius:10px;background:#232830;color:#e9e5dc;font-size:25px;line-height:1}
+.calendar-phase{text-align:center;color:#d5bc83;font-size:12px;margin:14px 0 12px}
+.calendar-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.calendar-weekday{text-align:center;font-size:11px;color:#9299a3;padding:7px 0}
+.calendar-day{min-width:0;aspect-ratio:1;display:grid;place-items:center;padding:0;border:1px solid transparent;
+ border-radius:10px;background:transparent;color:#e5e5e4;font-size:14px}
+.calendar-day.today{border-color:#5a636e}
+.calendar-day.in-range{background:rgba(199,176,119,.20);border-radius:7px}
+.calendar-day.range-endpoint{background:#dfd3b8;color:#1e1b18;font-weight:800;border-radius:10px}
+.calendar-selected{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:11px;color:#bcc1c8;
+ padding:12px 4px 8px}
+.calendar-selected>span{min-width:0;text-align:center}
+.calendar-arrow{color:#d6bd83}
+.calendar-validation{margin-top:10px;color:#ecaaa7;font-size:11px}
+.calendar-actions{display:flex;gap:7px;margin-top:10px}
+.calendar-actions button{flex:1;min-width:0;padding:10px 4px;border:1px solid var(--line);border-radius:10px;background:#252930;color:#d6d8db;font-size:11px}
+.calendar-actions button.calendar-done{background:#eae6dd;color:#131416;font-weight:750;border-color:transparent}
+.calendar-actions button:disabled{opacity:.35}
