@@ -1579,7 +1579,7 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
       <label>卡片名稱<input value={name} onChange={e => setName(e.target.value)} placeholder="例如：Sport 卡" /></label>
       <div className="two-col">
         <label>銀行<input value={bank} onChange={e => setBank(e.target.value)} placeholder="例如：台新" /></label>
-        <label>末四碼（選填）<input inputMode="numeric" maxLength={4} value={last4} onChange={e => setLast4(e.target.value.replace(/\\D/g,'').slice(0,4))} /></label>
+        <label>末四碼（選填）<input inputMode="numeric" maxLength={4} value={last4} onChange={e => setLast4(e.target.value.replace(/\D/g,'').slice(0,4))} /></label>
       </div>
       <label>每月刷卡總額上限<input inputMode="decimal" value={limit} onChange={e => setLimit(e.target.value)} placeholder="例如：15000" /></label>
       <label>回饋認列日期
@@ -1745,6 +1745,7 @@ function ProgramDateRange({ start, end, onChange }) {
         <small>結束日期</small><span>{end ? formatDateLong(end) : '選擇日期'}</span>
       </button>
     </div>
+    {!start && !end && !open && <p className="program-date-hint">若沒有設定活動期間，回饋會套用到歷史月份。跨年度換活動時，建議設定明確的開始與結束日期。</p>}
     {open && <div className="program-calendar">
       <div className="calendar-top">
         <button type="button" onClick={()=>setViewMonth(shiftCalendarMonth(viewMonth,-1))} aria-label="上個月">‹</button>
