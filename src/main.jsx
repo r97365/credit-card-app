@@ -200,8 +200,11 @@ function App() {
       if (!navigator.onLine) {
         const snapshot = await getSnapshot(session.user.id)
         if (snapshot) {
-          setCards(snapshot.cards || [])
-          setTransactions(snapshot.transactions || [])
+          const pending = await getQueuedMutations(session.user.id)
+          const restoredCards = mergeCardsWithLocalPending(snapshot.cards || [], snapshot.cards || [], pending)
+          const restoredTx = mergeTransactionsWithLocalPending(snapshot.transactions || [], snapshot.transactions || [], pending)
+          setCards(restoredCards)
+          setTransactions(restoredTx)
           setSnapshotSavedAt(snapshot.savedAt || null)
           const active = (snapshot.cards || []).filter(c => !c.archived)
           setSelectedCardId(prev =>
@@ -316,8 +319,11 @@ function App() {
         setOnline(false)
         const snapshot = await getSnapshot(session.user.id)
         if (snapshot) {
-          setCards(snapshot.cards || [])
-          setTransactions(snapshot.transactions || [])
+          const pending = await getQueuedMutations(session.user.id)
+          const restoredCards = mergeCardsWithLocalPending(snapshot.cards || [], snapshot.cards || [], pending)
+          const restoredTx = mergeTransactionsWithLocalPending(snapshot.transactions || [], snapshot.transactions || [], pending)
+          setCards(restoredCards)
+          setTransactions(restoredTx)
           setSnapshotSavedAt(snapshot.savedAt || null)
         } else {
           setError('網路連線失敗，而且沒有離線快取可以載入。')
