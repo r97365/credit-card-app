@@ -539,6 +539,10 @@ function App() {
 
   async function saveCard(payload) {
     const existing = payload.id ? cards.find(card => card.id === payload.id) : null
+    if (existing?.rewardPrograms?.some(p => p.capPeriod === 'statement') &&
+        cycleSchemaReady && !payload.statementCloseDay) {
+      throw new Error('這張卡有使用帳單週期的回饋活動，請先調整那些活動，再清除結帳日。')
+    }
     const id = payload.id || crypto.randomUUID()
     const updatedAt = new Date().toISOString()
     const sortOrder = existing?.sortOrder ?? activeCards.length
