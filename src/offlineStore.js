@@ -100,6 +100,10 @@ export async function getSnapshot(userId) {
     const primary = await requestResult(tx.objectStore(SNAPSHOTS).get(userId))
     const backup = await requestResult(tx.objectStore(SNAPSHOT_BACKUPS).get(userId))
     await txDone(tx)
+    // An older app might have written an empty primary just before a crash.
+    // Prefer a populated last-known-good backup instead of treating it as a new wallet.
+    if (isUsableSnapshot(backup) && backup.cards.length &&
+        (!isUsableSnapshot(primary) || !primary.cards.length)) return backup
     return isUsableSnapshot(primary) ? primary : isUsableSnapshot(backup) ? backup : null
   } finally {
     db.close()
