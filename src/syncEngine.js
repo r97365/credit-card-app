@@ -6,6 +6,7 @@ import {
   getConflicts,
   removeConflict,
   removeConflictsForRecord,
+  getQueuedMutationById,
 } from './offlineStore'
 
 const TABLES = {
@@ -160,43 +161,57 @@ async function applyMutation(mutation, { force = false } = {}) {
   return { ok:true }
 }
 
-export async function flushMutationQueue(userId) {
-  if (!userId || !navigator.onLine) return { synced:0, conflicts:0, offline:true }
+const activeFlushes = new Map()
 
-  const queue = await getQueuedMutations(userId)
-  let synced = 0
-  let conflicts = 0
+export function flushMutationQueue(userId) {
+  if (!userId || !navigator.onLine) return Promise.resolve({synced:0,conflicts:0,offline:true})
+  if (activeFlushes.has(userId)) return activeFlushes.get(userId)
+  const running = performFlush(userId).finally(() => activeFlushes.delete(userId))
+  activeFlushes.set(userId,running)
+  return running
+}
 
-  for (const mutation of queue) {
-    try {
-      const result = await applyMutation(mutation)
-      if (result.conflict) {
-        await saveConflict(userId, {
-          entity:mutation.entity,
-          recordId:mutation.recordId,
-          mutationId:mutation.id,
-          localPayload:mutation.payload,
-          remotePayload:result.remote,
-          remoteProgramExclusions:result.remoteProgramExclusions,
-          op:mutation.op,
-          baseUpdatedAt:mutation.baseUpdatedAt,
-          programExclusions:mutation.programExclusions,
-        })
-        conflicts += 1
-        continue
+async function performFlush(userId) {
+  let synced=0, conflicts=0
+  // Keep draining: new changes may be queued while the network request is in flight.
+  for (let pass=0; pass<10; pass++) {
+    const queue=await getQueuedMutations(userId)
+    let attempted=0
+    for (const item of queue) {
+      const mutation=await getQueuedMutationById(item.id)
+      if (!mutation) continue
+      if (mutation.op==='delete' && Number(mutation.notBefore || 0)>Date.now()) continue
+      attempted++
+      try {
+        const result=await applyMutation(mutation)
+        if (result.conflict) {
+          await saveConflict(userId,{
+            entity:mutation.entity,recordId:mutation.recordId,mutationId:mutation.id,
+            localPayload:mutation.payload,remotePayload:result.remote,
+            remoteProgramExclusions:result.remoteProgramExclusions,
+            op:mutation.op,baseUpdatedAt:mutation.baseUpdatedAt,
+            programExclusions:mutation.programExclusions,
+          })
+          conflicts++
+          continue
+        }
+        // An operation can be superseded by a newer mutation while awaiting Supabase.
+        const current=await getQueuedMutationById(mutation.id)
+        if (current && JSON.stringify(current)===JSON.stringify(mutation)) {
+          await removeMutation(mutation.id)
+          await removeConflictsForRecord(userId,mutation.entity,mutation.recordId)
+        }
+        synced++
+      } catch(error) {
+        if (isProbablyOffline(error)) return {synced,conflicts,offline:true}
+        throw error
       }
-      await removeMutation(mutation.id)
-      await removeConflictsForRecord(userId, mutation.entity, mutation.recordId)
-      synced += 1
-    } catch (error) {
-      if (isProbablyOffline(error)) {
-        return { synced, conflicts, offline:true }
-      }
-      throw error
     }
+    if (!attempted) break
+    if (queue.length && attempted===queue.length && conflicts===0) continue
+    break
   }
-
-  return { synced, conflicts, offline:false }
+  return {synced,conflicts,offline:false}
 }
 
 export async function resolveConflict(userId, conflict, choice) {
