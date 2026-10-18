@@ -4,7 +4,9 @@
 export function getStatementPeriodBounds(card, key) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(key || '')) return null
   const [year, month] = key.split('-').map(Number)
-  const day = Math.min(31, Math.max(1, Number(card?.statementCloseDay || 31)))
+  const configured = Number(card?.statementCloseDay)
+  if (!Number.isInteger(configured) || configured < 1 || configured > 31) return null
+  const day = configured
   const closingDay = Math.min(day, new Date(year, month, 0).getDate())
   const previousMonth = new Date(year, month - 2, 1)
   const prevYear = previousMonth.getFullYear()
@@ -20,6 +22,7 @@ export function getStatementPeriodBounds(card, key) {
 }
 
 export function getStatementPeriodKey(card, transaction) {
+  if (!getStatementPeriodBounds(card,'2026-01')) return ''
   const override = transaction?.statementPeriodOverride
   if (/^\d{4}-(0[1-9]|1[0-2])$/.test(override || '')) return override
   const date = transaction?.postedDate || transaction?.date
