@@ -1195,3 +1195,65 @@ textarea{
   font-size:11px;
   line-height:1.5;
 }
+
+/* v0.4.7 statement billing cycle support */
+.period-controls{margin:19px 0 15px}
+.period-modes{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:5px;
+  padding:5px;
+  border-radius:16px;
+  border:1px solid var(--line);
+  background:rgba(29,32,38,.92);
+}
+.period-modes button{
+  min-width:0;
+  min-height:36px;
+  border:0;
+  border-radius:12px;
+  padding:8px 3px;
+  font-size:12px;
+  font-weight:600;
+  background:transparent;
+  color:#8d96a0;
+}
+.period-modes button.selected{
+  background:linear-gradient(135deg,#eee9df,#dcd5c4);
+  color:#15171b;
+  box-shadow:0 3px 10px rgba(0,0,0,.15);
+}
+.period-modes button:disabled{opacity:.34}
+.period-controls .period-bar{margin:13px 0 0}
+.period-view-hint{font-size:11px;color:#838b95}
+.statement-period-info{
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  margin:0 0 16px;
+  padding:11px 13px;
+  border:1px solid rgba(202,173,114,.17);
+  background:rgba(207,181,126,.055);
+  border-radius:14px;
+}
+.statement-period-info strong{color:#e2d2aa;font-size:13px;font-weight:600}
+.statement-period-info span{color:#8c949e;font-size:11px}
+.cycle-help-text{
+  margin:6px 0 12px;
+  color:#89929e;
+  font-size:11px;
+  line-height:1.55;
+}
+.cycle-setup-note{
+  padding:10px 12px;
+  margin:6px 0 12px;
+  color:#d0bc94;
+  background:rgba(213,184,121,.085);
+  border:1px solid rgba(213,184,121,.18);
+  border-radius:12px;
+  font-size:11px;
+  line-height:1.55;
+}
+.period-cycle-hint{margin:-8px 0 16px}
+.cycle-assignment{margin:13px 0}
+.cycle-assignment select{max-width:100%}
