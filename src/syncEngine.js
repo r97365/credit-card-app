@@ -46,6 +46,9 @@ const TRACKED_FIELDS = {
 const NUMERIC_FIELDS = new Set(['amount','monthly_spend_limit','statement_close_day','sort_order','rate','reward_cap','spend_cap'])
 
 function equalField(field, a, b) {
+  // Programs created before this migration have no cap_period in queued payloads.
+  // Their existing behavior is a calendar reset; do not flag a false conflict.
+  if (field === 'cap_period') return (a || 'calendar') === (b || 'calendar')
   if (a == null || a === '') return b == null || b === ''
   if (b == null || b === '') return false
   if (NUMERIC_FIELDS.has(field)) return Number(a) === Number(b)
