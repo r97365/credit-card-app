@@ -2,12 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import './styles.css'
+import { readLastSelectedCard, rememberLastSelectedCard, resolveSelectedCard } from './cardPreference'
 import { calculateCardSummary, calculateCardSummaryStatement, calculateCardSummaryRange, getStatementPeriodBounds, getStatementPeriodKey, isStatementPeriodEstimated, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations, removeMutation } from './offlineStore'
 import { flushMutationQueue, resolveConflict, inspectSyncConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.4.9'
+const APP_VERSION = '0.4.10'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
@@ -33,6 +34,7 @@ function App() {
   const [cards, setCards] = useState([])
   const [transactions, setTransactions] = useState([])
   const [selectedCardId, setSelectedCardId] = useState(null)
+  const restoredUserRef = React.useRef(null)
   const [month, setMonth] = useState(localMonth())
   const [periodMode, setPeriodMode] = useState('month')
   const [rangeStart, setRangeStart] = useState(`${localMonth()}-01`)
@@ -141,11 +143,15 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (session?.user) loadData()
+    if (session?.user) {
+      restoredUserRef.current = session.user.id
+      loadData()
+    }
     if (session === null) {
       setCards([])
       setTransactions([])
       setSelectedCardId(null)
+      restoredUserRef.current = null
     }
   }, [session?.user?.id])
 
@@ -206,14 +212,11 @@ function App() {
           setCards(restoredCards)
           setTransactions(restoredTx)
           setSnapshotSavedAt(snapshot.savedAt || null)
-          const active = (snapshot.cards || []).filter(c => !c.archived)
-          setSelectedCardId(prev =>
-            preferredSelectedId && active.some(c => c.id === preferredSelectedId)
-              ? preferredSelectedId
-              : active.some(c => c.id === prev)
-                ? prev
-                : active[0]?.id || null
-          )
+          setSelectedCardId(prev => resolveSelectedCard(restoredCards, {
+            preferredId:preferredSelectedId,
+            savedId:readLastSelectedCard(session.user.id),
+            currentId:prev,
+          }))
         } else {
           setError('目前離線，而且這台裝置還沒有離線資料。')
         }
@@ -305,14 +308,11 @@ function App() {
       await saveSnapshot(session.user.id, { cards:nextCards, transactions:nextTx })
       setSnapshotSavedAt(new Date().toISOString())
 
-      const active = nextCards.filter(c => !c.archived)
-      setSelectedCardId(prev =>
-        preferredSelectedId && active.some(c => c.id === preferredSelectedId)
-          ? preferredSelectedId
-          : active.some(c => c.id === prev)
-            ? prev
-            : active[0]?.id || null
-      )
+      setSelectedCardId(prev => resolveSelectedCard(nextCards, {
+        preferredId:preferredSelectedId,
+        savedId:readLastSelectedCard(session.user.id),
+        currentId:prev,
+      }))
       await refreshSyncStatus()
     } catch (e) {
       if (networkError(e)) {
@@ -594,6 +594,7 @@ function App() {
     } else {
       setCards(prev => [...prev.filter(card => card.archived === false), nextCard, ...prev.filter(card => card.archived)])
       setSelectedCardId(id)
+      rememberLastSelectedCard(session.user.id,id)
     }
 
     await queueLocalMutation({
@@ -689,7 +690,11 @@ function App() {
     if (!card) return
     const updated = { ...card, sortOrder:-1, archived:true, updatedAt:new Date().toISOString() }
     setCards(prev => prev.map(item => item.id === cardId ? updated : item))
-    setSelectedCardId(prev => prev === cardId ? activeCards.find(c => c.id !== cardId)?.id || null : prev)
+    if (selectedCardId === cardId) {
+      const fallback=activeCards.find(c=>c.id!==cardId)?.id || null
+      setSelectedCardId(fallback)
+      rememberLastSelectedCard(session.user.id,fallback)
+    }
 
     await queueLocalMutation({
       entity:'card',
@@ -841,7 +846,7 @@ function App() {
         <EmptyCards onAdd={() => { setEditingCardId(null); setCreatingCard(true); setShowCardEditor(true) }} />
       ) : (
         <>
-          <CardStack cards={activeCards} selectedId={selectedCardId} onSelect={(id) => { setSelectedCardId(id); setShowTip(false) }} onReorder={reorderCards} />
+          <CardStack cards={activeCards} selectedId={selectedCardId} onSelect={(id) => { setSelectedCardId(id); rememberLastSelectedCard(session.user.id,id); setShowTip(false) }} onReorder={reorderCards} />
 
           <section className="summary-card">
             <div className="summary-head">
