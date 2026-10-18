@@ -764,15 +764,31 @@ function App() {
         <span className="sync-chevron">›</span>
       </button>}
 
-      <section className="period-bar">
-        <label className={`month-pill ${periodMode === 'month' ? 'active-period' : ''}`}>
-          <span>{month.replace('-', ' / ')}</span>
-          <input type="month" value={month} onChange={e => { setMonth(e.target.value); setPeriodMode('month') }} />
-        </label>
-        <button className={`ghost-btn range-trigger ${periodMode === 'range' ? 'active-range' : ''}`} onClick={() => setShowRangePicker(true)}>
-          {periodMode === 'range' ? `${formatDateShort(rangeStart)}–${formatDateShort(rangeEnd)}` : '自訂區間'}
-        </button>
+      <section className="period-controls">
+        <div className="period-modes">
+          <button className={periodMode === 'month' ? 'selected' : ''} onClick={()=>setPeriodMode('month')}>日曆月</button>
+          <button
+            disabled={!selectedCard?.statementCloseDay || !cycleSchemaReady}
+            className={periodMode === 'statement' ? 'selected' : ''}
+            onClick={()=>setPeriodMode('statement')}
+          >帳單週期</button>
+          <button className={periodMode === 'range' ? 'selected' : ''} onClick={()=>setShowRangePicker(true)}>自訂區間</button>
+        </div>
+        <section className="period-bar">
+          {periodMode !== 'range' ? <label className="month-pill active-period">
+            <span>{month.replace('-', ' / ')}{periodMode === 'statement' ? ' 帳單' : ''}</span>
+            <input type="month" value={month} onChange={e => setMonth(e.target.value)} />
+          </label> : <button className="month-pill active-period" onClick={()=>setShowRangePicker(true)}>
+            {formatDateShort(rangeStart)}～{formatDateShort(rangeEnd)}
+          </button>}
+          <span className="period-view-hint">{periodMode === 'statement' ? '依帳單歸屬查看' : periodMode === 'range' ? '自行指定日期' : '依刷卡日期查看'}</span>
+        </section>
       </section>
+      {selectedCard && !selectedCard.statementCloseDay && <div className="cycle-help-text period-cycle-hint">若要以帳單週期檢視，請先在這張卡的「卡片設定」輸入每月結帳日。</div>}
+      {periodMode === 'statement' && selectedCard?.statementCloseDay && <div className="statement-period-info">
+        <strong>{formatDateLong(getStatementPeriodBounds(selectedCard,month).start)}～{formatDateLong(getStatementPeriodBounds(selectedCard,month).end)}</strong>
+        <span>此期帳單 · {visibleTransactions.filter(isStatementPeriodEstimated).length} 筆尚未入帳（帳期預估）</span>
+      </div>}
 
       {expiringPrograms.length > 0 && <div className="expiry-banner">
         <div><strong>活動即將到期</strong><span>{expiringPrograms.slice(0,2).map(p => `${p.cardName}・${p.name} ${formatDateShort(p.endDate)}`).join('　')}</span></div>
@@ -830,9 +846,9 @@ function App() {
                   </div>
                   <div className="program-value">
                     <strong>{formatMoney(p.reward)}</strong>
-                    <span>{p.rewardCap == null
-                      ? (p.spendCap == null ? '無上限' : `${periodMode === 'range' ? '月' : ''}消費上限 ${formatMoney(p.spendCap)}`)
-                      : (periodMode === 'range' ? `月回饋上限 ${formatMoney(p.rewardCap)}` : `/ ${formatMoney(p.rewardCap)}`)}</span>
+                    <span>{p.capPeriod === 'statement' ? '帳期' : '月'} · {p.rewardCap == null
+                      ? (p.spendCap == null ? '無上限' : `消費上限 ${formatMoney(p.spendCap)}`)
+                      : `回饋上限 ${formatMoney(p.rewardCap)}`}</span>
                     {p.capped && <span className="done">✓</span>}
                   </div>
                 </div>
@@ -861,7 +877,7 @@ function App() {
                   onEdit={() => setEditingTransaction(tx)}
                 />
               ))}
-              {!visibleTransactions.length && <div className="empty-list">{periodMode === 'month' ? '這個月還沒有刷卡紀錄' : '這個區間還沒有刷卡紀錄'}</div>}
+              {!visibleTransactions.length && <div className="empty-list">{periodMode === 'month' ? '這個月還沒有刷卡紀錄' : periodMode === 'statement' ? '這期帳單還沒有刷卡紀錄' : '這個區間還沒有刷卡紀錄'}</div>}
             </div>
           </section>
         </>
