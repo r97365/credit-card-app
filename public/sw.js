@@ -1,4 +1,4 @@
-const CACHE_NAME = 'card-rewards-shell-v3'
+const CACHE_NAME = 'card-rewards-shell-v4'
 const APP_URL = self.registration.scope
 
 function sameAppUrl(value) {
@@ -19,21 +19,33 @@ async function cacheResponse(cache, request, response) {
 }
 
 async function cacheBuildAssets(cache, html) {
-  const urls = new Set([
+  const optionalUrls = [
     new URL('manifest.webmanifest', APP_URL).href,
     new URL('icon.svg', APP_URL).href,
-  ])
-
+  ]
+  const requiredUrls = new Set()
   const pattern = /(?:src|href)=["']([^"']+)["']/g
   let match
   while ((match = pattern.exec(html))) {
     const absolute = new URL(match[1], APP_URL).href
-    if (sameAppUrl(absolute)) urls.add(absolute)
+    if (sameAppUrl(absolute) && /\\.(?:js|css)(?:[?#]|$)/.test(absolute)) {
+      requiredUrls.add(absolute)
+    }
   }
+  if (!requiredUrls.size) throw new Error('No application assets found in the HTML')
 
-  await Promise.allSettled([...urls].map(async url => {
+  // Cache all required JS/CSS before publishing the new HTML entry point.
+  // This prevents an offline white screen after an interrupted update.
+  await Promise.all([...requiredUrls].map(async url => {
+    const cached = await cache.match(url)
+    if (cached) return
     const response = await fetch(url, { cache:'no-store' })
-    if (response.ok) await cache.put(url, response)
+    if (!response.ok) throw new Error('Missing app asset: ' + url)
+    await cache.put(url,response)
+  }))
+  await Promise.allSettled(optionalUrls.map(async url => {
+    const response = await fetch(url,{ cache:'no-store' })
+    if (response.ok) await cache.put(url,response)
   }))
 }
 
@@ -41,10 +53,9 @@ async function fetchAndCacheShell(cache) {
   const response = await fetch(APP_URL, { cache:'no-store' })
   if (!response.ok) throw new Error('App shell fetch failed')
 
-  const copy = response.clone()
-  const html = await copy.text()
-  await cache.put(APP_URL, response.clone())
-  await cacheBuildAssets(cache, html)
+  const html = await response.clone().text()
+  await cacheBuildAssets(cache,html)
+  await cache.put(APP_URL,response.clone())
   return response
 }
 
