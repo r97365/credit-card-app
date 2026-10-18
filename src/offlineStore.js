@@ -1,6 +1,7 @@
 const DB_NAME = 'card-rewards-offline'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const SNAPSHOTS = 'snapshots'
+const SNAPSHOT_BACKUPS = 'snapshotBackups'
 const QUEUE = 'mutationQueue'
 const CONFLICTS = 'conflicts'
 
@@ -10,19 +11,23 @@ function openDb() {
     request.onupgradeneeded = () => {
       const db = request.result
       if (!db.objectStoreNames.contains(SNAPSHOTS)) {
-        db.createObjectStore(SNAPSHOTS, { keyPath: 'userId' })
+        db.createObjectStore(SNAPSHOTS, { keyPath:'userId' })
+      }
+      if (!db.objectStoreNames.contains(SNAPSHOT_BACKUPS)) {
+        db.createObjectStore(SNAPSHOT_BACKUPS, { keyPath:'userId' })
       }
       if (!db.objectStoreNames.contains(QUEUE)) {
-        const store = db.createObjectStore(QUEUE, { keyPath: 'id' })
-        store.createIndex('userId', 'userId', { unique: false })
+        const store = db.createObjectStore(QUEUE, { keyPath:'id' })
+        store.createIndex('userId', 'userId', { unique:false })
       }
       if (!db.objectStoreNames.contains(CONFLICTS)) {
-        const store = db.createObjectStore(CONFLICTS, { keyPath: 'id' })
-        store.createIndex('userId', 'userId', { unique: false })
+        const store = db.createObjectStore(CONFLICTS, { keyPath:'id' })
+        store.createIndex('userId', 'userId', { unique:false })
       }
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
+    request.onblocked = () => reject(new Error('離線資料庫正在被另一個視窗使用，請關閉其他分頁後重試。'))
   })
 }
 
@@ -41,28 +46,64 @@ function txDone(tx) {
   })
 }
 
+// Cards must be loaded alongside transactions. A transaction-only state is a
+// *partial render*, not a valid complete snapshot.
+export function isUsableSnapshot(snapshot) {
+  return !!snapshot &&
+    Array.isArray(snapshot.cards) &&
+    Array.isArray(snapshot.transactions) &&
+    (snapshot.cards.length > 0 || snapshot.transactions.length === 0)
+}
+
+export function shouldReplaceSnapshot(previous, incoming) {
+  if (!isUsableSnapshot(incoming)) return false
+  // Archiving cards retains them in the card array. There is currently no
+  // delete-all-cards action, so do not overwrite a populated cache with [].
+  if (isUsableSnapshot(previous) && previous.cards.length && !incoming.cards.length) return false
+  return true
+}
+
 export async function saveSnapshot(userId, data) {
-  if (!userId) return
-  const db = await openDb()
-  const tx = db.transaction(SNAPSHOTS, 'readwrite')
-  tx.objectStore(SNAPSHOTS).put({
+  if (!userId) return false
+  const next = {
     userId,
-    cards: data.cards || [],
-    transactions: data.transactions || [],
-    savedAt: new Date().toISOString(),
-  })
-  await txDone(tx)
-  db.close()
+    cards:data.cards,
+    transactions:data.transactions,
+    savedAt:new Date().toISOString(),
+  }
+  if (!isUsableSnapshot(next)) return false
+
+  const db = await openDb()
+  try {
+    const tx = db.transaction([SNAPSHOTS, SNAPSHOT_BACKUPS], 'readwrite')
+    const primary = tx.objectStore(SNAPSHOTS)
+    const backup = tx.objectStore(SNAPSHOT_BACKUPS)
+    const previous = await requestResult(primary.get(userId))
+    if (shouldReplaceSnapshot(previous, next)) {
+      if (isUsableSnapshot(previous)) {
+        backup.put(previous)
+      }
+      primary.put(next)
+    }
+    await txDone(tx)
+    return shouldReplaceSnapshot(previous,next)
+  } finally {
+    db.close()
+  }
 }
 
 export async function getSnapshot(userId) {
   if (!userId) return null
   const db = await openDb()
-  const tx = db.transaction(SNAPSHOTS, 'readonly')
-  const result = await requestResult(tx.objectStore(SNAPSHOTS).get(userId))
-  await txDone(tx)
-  db.close()
-  return result || null
+  try {
+    const tx = db.transaction([SNAPSHOTS, SNAPSHOT_BACKUPS], 'readonly')
+    const primary = await requestResult(tx.objectStore(SNAPSHOTS).get(userId))
+    const backup = await requestResult(tx.objectStore(SNAPSHOT_BACKUPS).get(userId))
+    await txDone(tx)
+    return isUsableSnapshot(primary) ? primary : isUsableSnapshot(backup) ? backup : null
+  } finally {
+    db.close()
+  }
 }
 
 export async function queueMutation(userId, mutation) {
