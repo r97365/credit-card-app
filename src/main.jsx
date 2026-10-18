@@ -2,13 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import './styles.css'
-import { readLastSelectedCard, rememberLastSelectedCard, resolveSelectedCard } from './cardPreference'
+import { readLastSelectedCard, rememberLastSelectedCard, resolveSelectedCard, readCardView, rememberCardView, defaultCardView } from './cardPreference'
 import { calculateCardSummary, calculateCardSummaryStatement, calculateCardSummaryRange, getStatementPeriodBounds, getStatementPeriodKey, isStatementPeriodEstimated, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations, removeMutation } from './offlineStore'
 import { flushMutationQueue, resolveConflict, inspectSyncConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.4.10'
+const APP_VERSION = '0.4.11'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
@@ -37,6 +37,7 @@ function App() {
   const restoredUserRef = React.useRef(null)
   const [month, setMonth] = useState(localMonth())
   const [periodMode, setPeriodMode] = useState('month')
+  const viewCardIdRef = React.useRef(null)
   const [rangeStart, setRangeStart] = useState(`${localMonth()}-01`)
   const [rangeEnd, setRangeEnd] = useState(lastDayOfMonth(localMonth()))
   const [showRangePicker, setShowRangePicker] = useState(false)
@@ -151,6 +152,7 @@ function App() {
       setCards([])
       setTransactions([])
       setSelectedCardId(null)
+      viewCardIdRef.current = null
       restoredUserRef.current = null
     }
   }, [session?.user?.id])
@@ -336,13 +338,59 @@ function App() {
     }
   }
 
+  function selectCard(id) {
+    if (!session?.user || !id) return
+    if (selectedCardId === id) return
+    const card = cards.find(item => item.id === id && !item.archived)
+    if (!card) return
+    const view = readCardView(session.user.id, id, {
+      defaultMonth:localMonth(),
+      statementAllowed:Boolean(card.statementCloseDay && cycleSchemaReady),
+    })
+    viewCardIdRef.current = id
+    setMonth(view.month)
+    setPeriodMode(view.mode)
+    setRangeStart(view.rangeStart)
+    setRangeEnd(view.rangeEnd)
+    setSelectedCardId(id)
+    rememberLastSelectedCard(session.user.id,id)
+    setShowTip(false)
+  }
+
+  function changeView(next) {
+    if (!session?.user || !selectedCardId) return
+    const view = {
+      mode:next.mode ?? periodMode,
+      month:next.month ?? month,
+      rangeStart:next.rangeStart ?? rangeStart,
+      rangeEnd:next.rangeEnd ?? rangeEnd,
+    }
+    // Persist only a deliberate user action, never a render or data reload.
+    rememberCardView(session.user.id,selectedCardId,view)
+    setPeriodMode(view.mode)
+    setMonth(view.month)
+    setRangeStart(view.rangeStart)
+    setRangeEnd(view.rangeEnd)
+  }
+
   const activeCards = cards.filter(c => !c.archived)
   const selectedCard = activeCards.find(c => c.id === selectedCardId) || null
   useEffect(() => {
-    if (periodMode === 'statement' && !selectedCard?.statementCloseDay) {
-      setPeriodMode('month')
+    if (!session?.user || !selectedCardId || !selectedCard) return
+    if (viewCardIdRef.current !== selectedCardId) {
+      const view=readCardView(session.user.id, selectedCardId, {
+        defaultMonth:localMonth(),
+        statementAllowed:Boolean(selectedCard.statementCloseDay && cycleSchemaReady),
+      })
+      viewCardIdRef.current=selectedCardId
+      setPeriodMode(view.mode)
+      setMonth(view.month)
+      setRangeStart(view.rangeStart)
+      setRangeEnd(view.rangeEnd)
+    } else if (periodMode === 'statement' && !selectedCard.statementCloseDay && cycleSchemaReady) {
+      changeView({mode:'month'})
     }
-  }, [periodMode, selectedCard?.statementCloseDay])
+  }, [selectedCardId, session?.user?.id, selectedCard?.statementCloseDay, cycleSchemaReady])
   const summary = useMemo(
     () => selectedCard
       ? (periodMode === 'month'
@@ -594,6 +642,7 @@ function App() {
     } else {
       setCards(prev => [...prev.filter(card => card.archived === false), nextCard, ...prev.filter(card => card.archived)])
       setSelectedCardId(id)
+      viewCardIdRef.current = null
       rememberLastSelectedCard(session.user.id,id)
     }
 
@@ -693,6 +742,7 @@ function App() {
     if (selectedCardId === cardId) {
       const fallback=activeCards.find(c=>c.id!==cardId)?.id || null
       setSelectedCardId(fallback)
+      viewCardIdRef.current = null
       rememberLastSelectedCard(session.user.id,fallback)
     }
 
@@ -813,18 +863,18 @@ function App() {
 
       <section className="period-controls">
         <div className="period-modes">
-          <button className={periodMode === 'month' ? 'selected' : ''} onClick={()=>setPeriodMode('month')}>日曆月</button>
+          <button className={periodMode === 'month' ? 'selected' : ''} onClick={()=>changeView({mode:'month'})}>日曆月</button>
           <button
             disabled={!selectedCard?.statementCloseDay || !cycleSchemaReady}
             className={periodMode === 'statement' ? 'selected' : ''}
-            onClick={()=>setPeriodMode('statement')}
+            onClick={()=>changeView({mode:'statement'})}
           >帳單週期</button>
           <button className={periodMode === 'range' ? 'selected' : ''} onClick={()=>setShowRangePicker(true)}>自訂區間</button>
         </div>
         <section className="period-bar">
           {periodMode !== 'range' ? <label className="month-pill active-period">
             <span>{month.replace('-', ' / ')}{periodMode === 'statement' ? ' 帳單' : ''}</span>
-            <input type="month" value={month} onChange={e => setMonth(e.target.value)} />
+            <input type="month" value={month} onChange={e => changeView({month:e.target.value})} />
           </label> : <button className="month-pill active-period" onClick={()=>setShowRangePicker(true)}>
             {formatDateShort(rangeStart)}～{formatDateShort(rangeEnd)}
           </button>}
@@ -846,7 +896,7 @@ function App() {
         <EmptyCards onAdd={() => { setEditingCardId(null); setCreatingCard(true); setShowCardEditor(true) }} />
       ) : (
         <>
-          <CardStack cards={activeCards} selectedId={selectedCardId} onSelect={(id) => { setSelectedCardId(id); rememberLastSelectedCard(session.user.id,id); setShowTip(false) }} onReorder={reorderCards} />
+          <CardStack cards={activeCards} selectedId={selectedCardId} onSelect={selectCard} onReorder={reorderCards} />
 
           <section className="summary-card">
             <div className="summary-head">
@@ -942,9 +992,7 @@ function App() {
         endDate={rangeEnd}
         onClose={() => setShowRangePicker(false)}
         onApply={(start, end) => {
-          setRangeStart(start)
-          setRangeEnd(end)
-          setPeriodMode('range')
+          changeView({rangeStart:start,rangeEnd:end,mode:'range'})
           setShowRangePicker(false)
         }}
       />}
