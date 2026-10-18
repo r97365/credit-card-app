@@ -30,8 +30,8 @@ export function resolveSelectedCard(cards, { preferredId, savedId, currentId } =
 }
 
 const VIEW_PREFIX = 'card-rewards:card-period:v1:'
-const MONTH_PATTERN = /^\\d{4}-(0[1-9]|1[0-2])$/
-const DATE_PATTERN = /^\\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$/
+const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/
+const DATE_PATTERN = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
 
 export function defaultCardView(month) {
   const validMonth = MONTH_PATTERN.test(month || '') ? month : '2000-01'
