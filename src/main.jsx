@@ -316,6 +316,33 @@ function App() {
         nextTx = mergeTransactionsWithLocalPending(nextTx, snapshot.transactions || [], queue)
       }
 
+      // A successful-looking but empty response is unsafe when we know this
+      // account has cards. Keep the last valid local view until revalidated.
+      if (!nextCards.length && snapshot?.cards?.length) {
+        const recoveredCards = mergeCardsWithLocalPending(snapshot.cards, snapshot.cards, queue)
+        const recoveredTx = mergeTransactionsWithLocalPending(snapshot.transactions || [], snapshot.transactions || [], queue)
+        setCards(recoveredCards)
+        setTransactions(recoveredTx)
+        setLoadedUserId(session.user.id)
+        setOfflineDataMissing(false)
+        setSelectedCardId(prev => resolveSelectedCard(recoveredCards, {
+          preferredId:preferredSelectedId,
+          savedId:readLastSelectedCard(session.user.id),
+          currentId:prev,
+        }))
+        setError('雲端暫時沒有回傳任何信用卡，已保留本機上次的資料；請確認網路後再同步，避免誤建重複卡片。')
+        await refreshSyncStatus()
+        return
+      }
+
+      // Transactions without their cards are not a valid account state.
+      if (!nextCards.length && nextTx.length) {
+        setLoadedUserId(null)
+        setOfflineDataMissing(true)
+        setError('偵測到刷卡紀錄，但信用卡資料未載入完成。請確認連線，避免建立重複卡片。')
+        return
+      }
+
       setCards(nextCards)
       setTransactions(nextTx)
       setLoadedUserId(session.user.id)
