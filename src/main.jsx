@@ -2,12 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import './styles.css'
-import { calculateCardSummary, calculateCardSummaryRange, formatMoney, formatPct } from './rewardEngine'
+import { calculateCardSummary, calculateCardSummaryStatement, calculateCardSummaryRange, getStatementPeriodBounds, getStatementPeriodKey, isStatementPeriodEstimated, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
 import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations } from './offlineStore'
 import { flushMutationQueue, resolveConflict, inspectSyncConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.4.6'
+const APP_VERSION = '0.4.7'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
@@ -49,6 +49,7 @@ function App() {
   const [editingTransaction, setEditingTransaction] = useState(null)
   const [undoDelete, setUndoDelete] = useState(null)
   const [loadingData, setLoadingData] = useState(false)
+  const [cycleSchemaReady, setCycleSchemaReady] = useState(false)
   const [error, setError] = useState('')
   const [online, setOnline] = useState(navigator.onLine)
   const [pendingSync, setPendingSync] = useState(0)
@@ -232,6 +233,14 @@ function App() {
 
       const firstError = cardsRes.error || programsRes.error || txRes.error || exclusionsRes.error
       if (firstError) throw firstError
+      const hasCycleFields = cardsRes.data?.length
+        ? Object.prototype.hasOwnProperty.call(cardsRes.data[0], 'statement_close_day')
+        : programsRes.data?.length
+          ? Object.prototype.hasOwnProperty.call(programsRes.data[0], 'cap_period')
+          : txRes.data?.length
+            ? Object.prototype.hasOwnProperty.call(txRes.data[0], 'statement_period_override')
+            : false
+      setCycleSchemaReady(Boolean(hasCycleFields))
 
       const programsByCard = new Map()
       for (const p of programsRes.data || []) {
@@ -256,6 +265,7 @@ function App() {
         colors: normalizeCardColors(row.color_a, row.color_b),
         tip: row.tip || '',
         rewardDateBasis: row.reward_date_basis,
+        statementCloseDay:row.statement_close_day ?? null,
         rewardPrograms: programsByCard.get(row.id) || [],
         sortOrder: Number(row.sort_order || 0),
         archived: Number(row.sort_order || 0) < 0,
@@ -267,6 +277,7 @@ function App() {
         cardId: row.card_id,
         date: row.transaction_date,
         postedDate: row.posted_date,
+        statementPeriodOverride:row.statement_period_override || null,
         title: row.title,
         amount: Number(row.amount),
         excluded: row.excluded,
@@ -321,7 +332,9 @@ function App() {
     () => selectedCard
       ? (periodMode === 'month'
           ? calculateCardSummary(selectedCard, transactions, month)
-          : calculateCardSummaryRange(selectedCard, transactions, rangeStart, rangeEnd))
+          : periodMode === 'statement'
+            ? calculateCardSummaryStatement(selectedCard, transactions, month)
+            : calculateCardSummaryRange(selectedCard, transactions, rangeStart, rangeEnd))
       : null,
     [selectedCard, transactions, month, periodMode, rangeStart, rangeEnd]
   )
@@ -330,8 +343,10 @@ function App() {
     t.cardId === selectedCardId &&
     (periodMode === 'month'
       ? t.date.startsWith(month)
-      : t.date >= rangeStart && t.date <= rangeEnd)
-  ), [transactions, selectedCardId, periodMode, month, rangeStart, rangeEnd])
+      : periodMode === 'statement'
+        ? getStatementPeriodKey(selectedCard, t) === month
+        : t.date >= rangeStart && t.date <= rangeEnd)
+  ), [transactions, selectedCardId, selectedCard, periodMode, month, rangeStart, rangeEnd])
 
   const expiringPrograms = useMemo(() => {
     const today = localToday()
@@ -384,6 +399,7 @@ function App() {
       cardId:tx.cardId,
       date:tx.date,
       postedDate:null,
+      statementPeriodOverride:null,
       title:tx.title.trim(),
       amount:Number(tx.amount),
       excluded:false,
@@ -428,7 +444,7 @@ function App() {
       recordId:txId,
       op:'update',
       baseUpdatedAt:tx.updatedAt || null,
-      payload:toTransactionRow(nextTx, session.user.id),
+      payload:toTransactionRow(nextTx, session.user.id, cycleSchemaReady),
       programExclusions:nextTx.programExclusions || [],
     })
   }
@@ -446,7 +462,7 @@ function App() {
       recordId:txId,
       op:'update',
       baseUpdatedAt:tx.updatedAt || null,
-      payload:toTransactionRow(nextTx, session.user.id),
+      payload:toTransactionRow(nextTx, session.user.id, cycleSchemaReady),
       programExclusions:nextTx.programExclusions || [],
     })
     return true
@@ -462,6 +478,7 @@ function App() {
       cardId:payload.cardId,
       date:payload.date,
       postedDate:payload.postedDate || null,
+      statementPeriodOverride:payload.statementPeriodOverride || null,
       title:payload.title.trim(),
       amount:Number(payload.amount),
       excluded:payload.excluded,
@@ -478,7 +495,7 @@ function App() {
       recordId:payload.id,
       op:'update',
       baseUpdatedAt:previousTx.updatedAt || null,
-      payload:toTransactionRow(nextTx, session.user.id),
+      payload:toTransactionRow(nextTx, session.user.id, cycleSchemaReady),
       programExclusions:nextTx.programExclusions,
     })
   }
@@ -526,6 +543,7 @@ function App() {
       tip:payload.tip.trim() || '',
       colors:payload.colors,
       rewardDateBasis:payload.rewardDateBasis,
+      statementCloseDay:cycleSchemaReady ? (payload.statementCloseDay ? Number(payload.statementCloseDay) : null) : (existing?.statementCloseDay || null),
       rewardPrograms:existing?.rewardPrograms || [],
       sortOrder,
       archived:sortOrder < 0,
@@ -544,7 +562,7 @@ function App() {
       recordId:id,
       op:existing ? 'update' : 'create',
       baseUpdatedAt:existing?.updatedAt || null,
-      payload:toCardRow(nextCard, session.user.id),
+      payload:toCardRow(nextCard, session.user.id, cycleSchemaReady),
     })
   }
 
@@ -565,6 +583,7 @@ function App() {
       rounding:p.rounding,
       startDate:p.startDate || null,
       endDate:p.endDate || null,
+      capPeriod:cycleSchemaReady ? (p.capPeriod || 'calendar') : 'calendar',
       updatedAt,
     }
 
@@ -580,7 +599,7 @@ function App() {
       recordId:id,
       op:existing ? 'update' : 'create',
       baseUpdatedAt:existing?.updatedAt || null,
-      payload:toProgramRow(nextProgram, cardId, session.user.id),
+      payload:toProgramRow(nextProgram, cardId, session.user.id, cycleSchemaReady),
     })
   }
 
@@ -616,7 +635,7 @@ function App() {
         recordId:card.id,
         op:'update',
         baseUpdatedAt:active.find(x => x.id === card.id)?.updatedAt || null,
-        payload:toCardRow(card, session.user.id),
+        payload:toCardRow(card, session.user.id, cycleSchemaReady),
       })
     }
     await refreshSyncStatus()
@@ -635,7 +654,7 @@ function App() {
       recordId:cardId,
       op:'update',
       baseUpdatedAt:card.updatedAt || null,
-      payload:toCardRow(updated, session.user.id),
+      payload:toCardRow(updated, session.user.id, cycleSchemaReady),
     })
   }
 
@@ -650,7 +669,7 @@ function App() {
       recordId:cardId,
       op:'update',
       baseUpdatedAt:card.updatedAt || null,
-      payload:toCardRow(updated, session.user.id),
+      payload:toCardRow(updated, session.user.id, cycleSchemaReady),
     })
   }
 
@@ -668,6 +687,7 @@ function App() {
         spendCap:p.spendCap,
         calcMode:p.calcMode,
         rounding:p.rounding,
+        capPeriod:p.capPeriod || 'calendar',
         startDate:shifted.startDate,
         endDate:shifted.endDate,
         updatedAt:new Date().toISOString(),
@@ -684,7 +704,7 @@ function App() {
         entity:'program',
         recordId:program.id,
         op:'create',
-        payload:toProgramRow(program, cardId, session.user.id),
+        payload:toProgramRow(program, cardId, session.user.id, cycleSchemaReady),
       })
     }
     await refreshSyncStatus()
@@ -865,9 +885,10 @@ function App() {
           setShowRangePicker(false)
         }}
       />}
-      {editingTransaction && <TransactionEditor tx={editingTransaction} cards={activeCards} onClose={() => setEditingTransaction(null)} onSave={saveTransactionEdits} />}
+      {editingTransaction && <TransactionEditor tx={editingTransaction} cards={activeCards} cycleSchemaReady={cycleSchemaReady} onClose={() => setEditingTransaction(null)} onSave={saveTransactionEdits} />}
       {showCardEditor && <CardEditor
         card={creatingCard ? null : (activeCards.find(c => c.id === editingCardId) || selectedCard)}
+        cycleSchemaReady={cycleSchemaReady}
         onClose={() => { setShowCardEditor(false); setCreatingCard(false); setEditingCardId(null) }}
         onSaveCard={saveCard}
         onSaveProgram={saveProgram}
@@ -1966,17 +1987,17 @@ function comparisonFields(conflict, cards) {
     transaction: [
       ['card_id','信用卡'], ['transaction_date','交易日'], ['posted_date','入帳日'],
       ['title','刷卡項目'], ['amount','金額'], ['excluded','整筆排除回饋'],
-      ['reconciled','已核對帳單'], ['programExclusions','指定排除的活動'],
+      ['reconciled','已核對帳單'], ['statement_period_override','手動帳期'], ['programExclusions','指定排除的活動'],
     ],
     card: [
       ['name','卡片名稱'], ['bank','銀行'], ['last4','末四碼'], ['monthly_spend_limit','月刷卡控制上限'],
-      ['tip','卡片 Tip'], ['reward_date_basis','回饋認列日期'], ['sort_order','排序／封存'],
+      ['tip','卡片 Tip'], ['reward_date_basis','回饋認列日期'], ['statement_close_day','每月結帳日'], ['sort_order','排序／封存'],
       ['color_a','卡面底色'], ['color_b','卡面漸層色'],
     ],
     program: [
       ['card_id','信用卡'], ['name','活動名稱'], ['rate','回饋比例'],
       ['reward_cap','回饋金上限'], ['spend_cap','消費金額上限'],
-      ['calc_mode','計算方式'], ['rounding','小數處理'],
+      ['calc_mode','計算方式'], ['rounding','小數處理'], ['cap_period','回饋上限週期'],
       ['start_date','開始日期'], ['end_date','結束日期'],
     ],
   }
@@ -2004,6 +2025,9 @@ function conflictValue(key, value, cards) {
   if (key === 'rate') return `${Number(value)}%`
   if (key === 'excluded' || key === 'reconciled') return value === true || value === 'true' ? '是' : '否'
   if (key === 'reward_date_basis') return value === 'posted' ? '入帳日' : '交易日'
+  if (key === 'cap_period') return value === 'statement' ? '帳單週期' : '日曆月'
+  if (key === 'statement_period_override') return formatMonthLong(value) + '帳單'
+  if (key === 'statement_close_day') return '每月 ' + value + ' 號'
   if (key === 'calc_mode') return value === 'per_transaction' ? '每筆分別計算' : '每月合併計算'
   if (key === 'rounding') return value === 'round' ? '四捨五入' : '無條件捨去'
   if (key === 'sort_order') return Number(value) < 0 ? '已封存' : `第 ${Number(value)+1} 張`
@@ -2046,16 +2070,17 @@ function fromProgramRow(p) {
   return {
     id:p.id, name:p.name, rate:Number(p.rate), rewardCap:p.reward_cap == null ? null : Number(p.reward_cap),
     spendCap:p.spend_cap == null ? null : Number(p.spend_cap), calcMode:p.calc_mode, rounding:p.rounding,
-    startDate:p.start_date, endDate:p.end_date, updatedAt:p.updated_at,
+    startDate:p.start_date, endDate:p.end_date, capPeriod:p.cap_period || 'calendar', updatedAt:p.updated_at,
   }
 }
-function toTransactionRow(tx, userId){
+function toTransactionRow(tx, userId, cycleSchemaReady = false){
   return {
     id:tx.id,
     user_id:userId,
     card_id:tx.cardId,
     transaction_date:tx.date,
     posted_date:tx.postedDate || null,
+    ...(cycleSchemaReady ? { statement_period_override:tx.statementPeriodOverride || null } : {}),
     title:tx.title,
     amount:Number(tx.amount),
     excluded:Boolean(tx.excluded),
@@ -2064,7 +2089,7 @@ function toTransactionRow(tx, userId){
   }
 }
 
-function toCardRow(card, userId){
+function toCardRow(card, userId, cycleSchemaReady = false){
   return {
     id:card.id,
     user_id:userId,
@@ -2076,12 +2101,13 @@ function toCardRow(card, userId){
     monthly_spend_limit:card.monthlySpendLimit || null,
     tip:card.tip || null,
     reward_date_basis:card.rewardDateBasis || 'transaction',
+    ...(cycleSchemaReady ? { statement_close_day:card.statementCloseDay || null } : {}),
     sort_order:Number(card.sortOrder || 0),
     updated_at:card.updatedAt || new Date().toISOString(),
   }
 }
 
-function toProgramRow(program, cardId, userId){
+function toProgramRow(program, cardId, userId, cycleSchemaReady = false){
   return {
     id:program.id,
     user_id:userId,
@@ -2092,6 +2118,7 @@ function toProgramRow(program, cardId, userId){
     spend_cap:program.spendCap == null ? null : Number(program.spendCap),
     calc_mode:program.calcMode || 'monthly_total',
     rounding:program.rounding || 'floor',
+    ...(cycleSchemaReady ? { cap_period:program.capPeriod || 'calendar' } : {}),
     start_date:program.startDate || null,
     end_date:program.endDate || null,
     updated_at:program.updatedAt || new Date().toISOString(),
