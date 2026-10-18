@@ -105,8 +105,10 @@ function calculateSummary(card, allTransactions, period) {
   const eligibleSpend = sum(visible.filter(tx => !tx.excluded).map(tx => tx.amount))
   const excludedSpend = sum(visible.filter(tx => tx.excluded).map(tx => tx.amount))
 
-  const programs = (card.rewardPrograms || []).filter(program => overlapsProgram(period,program,card))
-    .map(program => {
+  const programs = (card.rewardPrograms || []).filter(program =>
+    overlapsProgram(period,program,card) ||
+    visible.some(tx => isRewardEligibleOnDate(card,program,tx))
+  ).map(program => {
       // A cap applies to *all* charges in its genuine period, including charges
       // outside the currently visible calendar view.
       const grouped = new Map()
