@@ -1497,11 +1497,12 @@ function MonthField({ value, onChange, placeholder = '選擇月份' }) {
   </div>
 }
 
-function TransactionEditor({ tx, cards, onClose, onSave }) {
+function TransactionEditor({ tx, cards, cycleSchemaReady, onClose, onSave }) {
   const currentCard = cards.find(c => c.id === tx.cardId) || cards[0]
   const [cardId,setCardId] = useState(tx.cardId)
   const [date,setDate] = useState(tx.date)
   const [postedDate,setPostedDate] = useState(tx.postedDate || '')
+  const [statementPeriodOverride,setStatementPeriodOverride] = useState(tx.statementPeriodOverride || '')
   const [title,setTitle] = useState(tx.title)
   const [amount,setAmount] = useState(String(Math.abs(tx.amount)))
   const [isRefund,setIsRefund] = useState(Number(tx.amount) < 0)
@@ -1518,15 +1519,28 @@ function TransactionEditor({ tx, cards, onClose, onSave }) {
   async function save() {
     setBusy(true)
     try {
-      await onSave({ id:tx.id,cardId,date,postedDate,title,amount:isRefund ? -Math.abs(Number(amount)) : Math.abs(Number(amount)),excluded,reconciled,programExclusions })
+      await onSave({ id:tx.id,cardId,date,postedDate,statementPeriodOverride,title,amount:isRefund ? -Math.abs(Number(amount)) : Math.abs(Number(amount)),excluded,reconciled,programExclusions })
     } catch(e){ alert(e.message) }
     finally { setBusy(false) }
   }
 
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
     <SheetGrabber onClose={onClose} /><div className="sheet-title-row"><h3>編輯刷卡紀錄</h3><button className="close-btn" onClick={onClose}>×</button></div>
-    <label>信用卡<select value={cardId} onChange={e=>{setCardId(e.target.value);setProgramExclusions([])}}>{cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+    <label>信用卡<select value={cardId} onChange={e=>{setCardId(e.target.value);setProgramExclusions([]);setStatementPeriodOverride('')}}>{cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
     <div className="transaction-date-grid"><label>交易日<DateField value={date} onChange={setDate} /></label><label>入帳日（選填）<DateField value={postedDate} onChange={setPostedDate} placeholder="未設定" /></label></div>
+    {cycleSchemaReady && selected?.statementCloseDay && <div className="cycle-assignment">
+      <label>歸屬帳期
+        <select value={statementPeriodOverride} onChange={e=>setStatementPeriodOverride(e.target.value)}>
+          <option value="">自動判定（{formatMonthLong(getStatementPeriodKey(selected,{ date,postedDate }))}帳單）</option>
+          {nearbyStatementKeys(getStatementPeriodKey(selected,{date,postedDate})).map(key=>
+            <option key={key} value={key}>{formatMonthLong(key)}帳單</option>)}
+        </select>
+      </label>
+      <div className="cycle-help-text">{statementPeriodOverride
+        ? '手動指定：下次同步也會保留這個帳期，不修改原始交易日。'
+        : postedDate ? '依入帳日自動歸類，與銀行實際帳單不同時可手動指定。'
+          : '尚未填入入帳日，目前依交易日預估帳期；請在帳單出來後核對。'}</div>
+    </div>}
     <label>刷卡項目<input value={title} onChange={e=>setTitle(e.target.value)} /></label>
     <label>金額
       <div className="amount-with-refund">
@@ -1544,7 +1558,7 @@ function TransactionEditor({ tx, cards, onClose, onSave }) {
   </div></div>
 }
 
-function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram, onArchiveCard, onDuplicatePrograms }) {
+function CardEditor({ card, cycleSchemaReady, onClose, onSaveCard, onSaveProgram, onDeleteProgram, onArchiveCard, onDuplicatePrograms }) {
   const isNew = !card
   const [name, setName] = useState(card?.name || '')
   const [bank, setBank] = useState(card?.bank || '')
@@ -1553,6 +1567,7 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
   const [tip, setTip] = useState(card?.tip || '')
   const [colors, setColors] = useState(card?.colors || PALETTES[0])
   const [basis, setBasis] = useState(card?.rewardDateBasis || 'transaction')
+  const [statementCloseDay, setStatementCloseDay] = useState(card?.statementCloseDay || '')
   const [programEditing, setProgramEditing] = useState(null)
   const [busy, setBusy] = useState(false)
   const sheetRef = React.useRef(null)
@@ -1587,7 +1602,7 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
   async function saveCard() {
     setBusy(true)
     try {
-      await onSaveCard({ id:card?.id, name, bank, last4, monthlySpendLimit:limit, tip, colors, rewardDateBasis:basis })
+      await onSaveCard({ id:card?.id, name, bank, last4, monthlySpendLimit:limit, tip, colors, rewardDateBasis:basis, statementCloseDay })
       onClose()
     } catch (e) { alert(e.message) }
     finally { setBusy(false) }
@@ -1606,6 +1621,14 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
       <label>回饋認列日期
         <select value={basis} onChange={e => setBasis(e.target.value)}><option value="transaction">交易日</option><option value="posted">入帳日</option></select>
       </label>
+      <label>銀行每月結帳日（選填）
+        <select disabled={!cycleSchemaReady} value={statementCloseDay} onChange={e => setStatementCloseDay(e.target.value)}>
+          <option value="">尚未設定</option>
+          {Array.from({ length:31 },(_,i)=>i+1).map(day => <option key={day} value={day}>{day} 號</option>)}
+        </select>
+      </label>
+      {!cycleSchemaReady && <div className="cycle-setup-note">帳期功能需要先在 Supabase 執行 002_statement_cycles.sql，再重新開啟 App。</div>}
+      <p className="cycle-help-text">如果銀行固定每月 10 號結帳，系統會自動分成 9/11～10/10、10/11～11/10 等帳期。尚未入帳的交易只會預估歸期。</p>
       <label>Tip<textarea value={tip} onChange={e => setTip(e.target.value)} placeholder="只有點 ⓘ 才會顯示" /></label>
       <div className="field-label">卡片樣式</div>
       <div className="palette-list">{PALETTES.map((p,i) => <button key={i} className={`palette ${colors[0]===p[0]?'chosen':''}`} style={{background:`linear-gradient(135deg,${p[0]},${p[1]})`}} onClick={() => setColors(p)} aria-label={`卡片配色 ${i+1}`} />)}</div>
@@ -1617,6 +1640,8 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
         {programEditing && <ProgramEditor
           key={programEditing.id || 'new-program'}
           value={programEditing}
+          cardCloseDay={statementCloseDay}
+          cycleSchemaReady={cycleSchemaReady}
           containerRef={programEditorRef}
           nameInputRef={programNameRef}
           onCancel={() => setProgramEditing(null)}
@@ -1652,7 +1677,7 @@ function CardEditor({ card, onClose, onSaveCard, onSaveProgram, onDeleteProgram,
   </div>
 }
 
-function ProgramEditor({ value, containerRef, nameInputRef, onCancel, onSave }) {
+function ProgramEditor({ value, cardCloseDay, cycleSchemaReady, containerRef, nameInputRef, onCancel, onSave }) {
   const initialCapType = value.rewardCap != null ? 'reward' : value.spendCap != null ? 'spend' : 'none'
   const [name,setName]=useState(value.name || '')
   const [rate,setRate]=useState(value.rate ?? '')
@@ -1660,6 +1685,7 @@ function ProgramEditor({ value, containerRef, nameInputRef, onCancel, onSave }) 
   const [capValue,setCapValue]=useState(value.rewardCap ?? value.spendCap ?? '')
   const [calcMode,setCalcMode]=useState(value.calcMode || 'monthly_total')
   const [rounding,setRounding]=useState(value.rounding || 'floor')
+  const [capPeriod,setCapPeriod]=useState(value.capPeriod || 'calendar')
   const [startDate,setStartDate]=useState(value.startDate || '')
   const [endDate,setEndDate]=useState(value.endDate || '')
   const [saving,setSaving]=useState(false)
@@ -1669,9 +1695,13 @@ function ProgramEditor({ value, containerRef, nameInputRef, onCancel, onSave }) 
   async function saveProgram() {
     if (saving || !name.trim() || rate === '' || !Number.isFinite(Number(rate)) || Number(rate) < 0) return
     if (startDate && endDate && endDate < startDate) return
+    if (capPeriod === 'statement' && (!cycleSchemaReady || !Number(cardCloseDay))) {
+      alert('請先在信用卡設定中填寫每月結帳日，並完成資料庫更新。')
+      return
+    }
     setSaving(true)
     try {
-      await onSave({ ...value, name, rate, capType, capValue, calcMode, rounding, startDate, endDate })
+      await onSave({ ...value, name, rate, capType, capValue, calcMode, rounding, capPeriod, startDate, endDate })
     } catch (e) {
       alert(e.message)
     } finally {
@@ -1694,7 +1724,15 @@ function ProgramEditor({ value, containerRef, nameInputRef, onCancel, onSave }) 
     </div>
     <label>上限類型<select value={capType} onChange={e=>setCapType(e.target.value)}><option value="none">無上限</option><option value="reward">回饋金上限</option><option value="spend">消費金額上限</option></select></label>
     {capType !== 'none' && <label>{capType === 'reward' ? '回饋金上限' : '消費金額上限'}<input ref={capRef} inputMode="decimal" enterKeyHint="done" value={capValue} onChange={e=>setCapValue(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur()}} /></label>}
-    <div className="two-col"><label>計算方式<select value={calcMode} onChange={e=>setCalcMode(e.target.value)}><option value="monthly_total">整月加總後計算</option><option value="per_transaction">單項計算再加總</option></select></label><label>小數處理<select value={rounding} onChange={e=>setRounding(e.target.value)}><option value="floor">無條件捨去</option><option value="round">四捨五入</option></select></label></div>
+    <div className="two-col"><label>計算方式<select value={calcMode} onChange={e=>setCalcMode(e.target.value)}><option value="monthly_total">該期合併後計算</option><option value="per_transaction">單項計算再加總</option></select></label><label>小數處理<select value={rounding} onChange={e=>setRounding(e.target.value)}><option value="floor">無條件捨去</option><option value="round">四捨五入</option></select></label></div>
+    <label>回饋上限重置週期
+      <select value={capPeriod} onChange={e=>setCapPeriod(e.target.value)} disabled={!cycleSchemaReady}>
+        <option value="calendar">日曆月（每月 1 日重置）</option>
+        <option value="statement" disabled={!Number(cardCloseDay)}>帳單週期（依此卡結帳日重置）</option>
+      </select>
+    </label>
+    {capPeriod === 'statement' && <div className="cycle-help-text">每月 {cardCloseDay || '—'} 號結帳，每期獨立計算活動上限。</div>}
+    {!cycleSchemaReady && <div className="cycle-setup-note">先執行資料庫更新，才能選帳單週期。</div>}
     <ProgramDateRange
       start={startDate}
       end={endDate}
@@ -2198,6 +2236,14 @@ function formatDateShort(date){
 function formatDateLong(date){
   const [y,m,d] = date.split('-')
   return `${Number(y)}年${Number(m)}月${Number(d)}日`
+}
+function nearbyStatementKeys(month) {
+  if (!month) return []
+  const [year,number] = month.split('-').map(Number)
+  return [-2,-1,0,1,2].map(delta=>{
+    const date = new Date(year, number - 1 + delta, 1)
+    return date.getFullYear() + '-' + String(date.getMonth()+1).padStart(2,'0')
+  })
 }
 function formatMonthLong(month){
   const [y,m] = month.split('-')
