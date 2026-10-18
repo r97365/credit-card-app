@@ -133,3 +133,28 @@ test('new year gets new reward program without altering past statement reward',(
   assert.equal(calculateCardSummaryStatement(oneCard,rows,'2026-12').totalReward,20)
   assert.equal(calculateCardSummaryStatement(oneCard,rows,'2027-02').totalReward,60)
 })
+
+
+test('calendar view includes a purchase whose posting date matches a later campaign',()=>{
+  const p={...reward({id:'nov',name:'November posting',rate:5,startDate:'2026-11-01',endDate:'2026-11-30'}),capPeriod:'calendar'}
+  const oneCard={...card([p],'posted'),statementCloseDay:10}
+  const rows=[tx('end','2026-10-31',1000,'2026-11-02')]
+  const october=calculateCardSummary(oneCard,rows,'2026-10')
+  assert.equal(october.totalSpend,1000)
+  assert.equal(october.totalReward,50)
+})
+
+test('statement cap resets after close date and postponed posting joins next statement',()=>{
+  const p={...reward({id:'bill',name:'Bill 3%',rate:3}),capPeriod:'statement',rewardCap:90}
+  const oneCard={...card([p]),statementCloseDay:10}
+  const charges=[
+    tx('a','2026-10-08',5000,'2026-10-09'),
+    tx('b','2026-10-09',5000,'2026-10-12'),
+  ]
+  const old=calculateCardSummaryStatement(oneCard,charges,'2026-10')
+  const next=calculateCardSummaryStatement(oneCard,charges,'2026-11')
+  assert.equal(old.totalReward,90)
+  assert.equal(next.totalReward,90)
+  assert.equal(old.totalSpend,5000)
+  assert.equal(next.totalSpend,5000)
+})
