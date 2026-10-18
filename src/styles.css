@@ -1257,3 +1257,37 @@ textarea{
 .period-cycle-hint{margin:-8px 0 16px}
 .cycle-assignment{margin:13px 0}
 .cycle-assignment select{max-width:100%}
+
+/* v0.4.8 — prevent stacked cards from covering the summary on 5+ card wallets */
+.wallet-stack{
+  --wallet-card-height:190px;
+  min-height:0;
+  flex-shrink:0;
+}
+@media(max-width:380px){
+  .wallet-stack{--wallet-card-height:176px}
+}
+.wallet-reorder-hint{bottom:0 !important}
+.custom-date-field.clearable-date{
+  padding-right:53px !important;
+}
+.custom-date-field.clearable-date input[type="date"]{
+  right:55px !important;
+  width:calc(100% - 55px) !important;
+}
+.custom-date-field .date-clear-btn{
+  position:absolute;
+  z-index:5;
+  top:50%;
+  right:5px;
+  transform:translateY(-50%);
+  border:1px solid rgba(255,255,255,.13);
+  border-radius:9px;
+  background:#292d34;
+  color:#c9cbd1;
+  padding:8px 7px;
+  font-size:11px;
+  min-width:40px;
+  min-height:33px;
+  touch-action:manipulation;
+}
