@@ -8,7 +8,7 @@ import { supabase } from './supabase'
 import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations, removeMutation } from './offlineStore'
 import { flushMutationQueue, resolveConflict, inspectSyncConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.4.11'
+const APP_VERSION = '0.4.12'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
@@ -52,6 +52,8 @@ function App() {
   const [editingTransaction, setEditingTransaction] = useState(null)
   const [undoDelete, setUndoDelete] = useState(null)
   const [loadingData, setLoadingData] = useState(false)
+  const [loadedUserId, setLoadedUserId] = useState(null)
+  const [offlineDataMissing, setOfflineDataMissing] = useState(false)
   const [cycleSchemaReady, setCycleSchemaReady] = useState(false)
   const [error, setError] = useState('')
   const [online, setOnline] = useState(navigator.onLine)
@@ -152,17 +154,21 @@ function App() {
       setCards([])
       setTransactions([])
       setSelectedCardId(null)
+      setLoadedUserId(null)
+      setOfflineDataMissing(false)
       viewCardIdRef.current = null
       restoredUserRef.current = null
     }
   }, [session?.user?.id])
 
   useEffect(() => {
-    if (!session?.user || (!cards.length && !transactions.length)) return
+    // Do not persist an incomplete startup view or a previous user's data.
+    if (!session?.user || loadedUserId !== session.user.id || loadingData) return
+    if (!cards.length && transactions.length) return
     saveSnapshot(session.user.id, { cards, transactions })
-      .then(() => setSnapshotSavedAt(new Date().toISOString()))
-      .catch(() => {})
-  }, [session?.user?.id, cards, transactions])
+      .then(saved => { if (saved) setSnapshotSavedAt(new Date().toISOString()) })
+      .catch(err => setError('本機離線資料儲存失敗：' + (err?.message || '未知錯誤')))
+  }, [session?.user?.id, loadedUserId, loadingData, cards, transactions])
 
   async function refreshSyncStatus() {
     if (!session?.user) return
@@ -203,6 +209,7 @@ function App() {
     if (!session?.user) return
     setLoadingData(true)
     setError('')
+    setOfflineDataMissing(false)
 
     try {
       if (!navigator.onLine) {
@@ -213,6 +220,8 @@ function App() {
           const restoredTx = mergeTransactionsWithLocalPending(snapshot.transactions || [], snapshot.transactions || [], pending)
           setCards(restoredCards)
           setTransactions(restoredTx)
+          setLoadedUserId(session.user.id)
+          setOfflineDataMissing(false)
           setSnapshotSavedAt(snapshot.savedAt || null)
           setSelectedCardId(prev => resolveSelectedCard(restoredCards, {
             preferredId:preferredSelectedId,
@@ -220,7 +229,9 @@ function App() {
             currentId:prev,
           }))
         } else {
-          setError('目前離線，而且這台裝置還沒有離線資料。')
+          setLoadedUserId(null)
+          setOfflineDataMissing(true)
+          setError('目前沒有可用的離線卡片快取。請恢復網路開啟一次，完成資料載入後再測試離線模式。')
         }
         await refreshSyncStatus()
         return
@@ -307,8 +318,10 @@ function App() {
 
       setCards(nextCards)
       setTransactions(nextTx)
-      await saveSnapshot(session.user.id, { cards:nextCards, transactions:nextTx })
-      setSnapshotSavedAt(new Date().toISOString())
+      setLoadedUserId(session.user.id)
+      setOfflineDataMissing(false)
+      const didSave=await saveSnapshot(session.user.id, { cards:nextCards, transactions:nextTx })
+      if (didSave) setSnapshotSavedAt(new Date().toISOString())
 
       setSelectedCardId(prev => resolveSelectedCard(nextCards, {
         preferredId:preferredSelectedId,
@@ -326,9 +339,18 @@ function App() {
           const restoredTx = mergeTransactionsWithLocalPending(snapshot.transactions || [], snapshot.transactions || [], pending)
           setCards(restoredCards)
           setTransactions(restoredTx)
+          setLoadedUserId(session.user.id)
+          setOfflineDataMissing(false)
           setSnapshotSavedAt(snapshot.savedAt || null)
+          setSelectedCardId(prev => resolveSelectedCard(restoredCards, {
+            preferredId:preferredSelectedId,
+            savedId:readLastSelectedCard(session.user.id),
+            currentId:prev,
+          }))
         } else {
-          setError('網路連線失敗，而且沒有離線快取可以載入。')
+          setLoadedUserId(null)
+          setOfflineDataMissing(true)
+          setError('網路連線失敗，且沒有可用的離線卡片資料；請恢復網路重新載入。')
         }
       } else {
         setError(e.message)
@@ -374,7 +396,7 @@ function App() {
   }
 
   const activeCards = cards.filter(c => !c.archived)
-  const selectedCard = activeCards.find(c => c.id === selectedCardId) || null
+  const selectedCard = activeCards.find(c => c.id === selectedCardId) || activeCards[0] || null
   useEffect(() => {
     if (!session?.user || !selectedCardId || !selectedCard) return
     if (viewCardIdRef.current !== selectedCardId) {
@@ -892,7 +914,9 @@ function App() {
         <button onClick={() => { if (selectedCard) { setEditingCardId(selectedCard.id); setCreatingCard(false); setShowCardEditor(true) } }}>更新</button>
       </div>}
 
-      {loadingData ? <CenteredState compact title="同步資料中…" /> : !selectedCard ? (
+      {loadingData ? <CenteredState compact title="同步資料中…" /> : offlineDataMissing ? (
+        <CenteredState compact title="離線卡片資料尚未準備；請恢復網路開啟一次，避免新增重複卡片。" />
+      ) : !selectedCard ? (
         <EmptyCards onAdd={() => { setEditingCardId(null); setCreatingCard(true); setShowCardEditor(true) }} />
       ) : (
         <>
