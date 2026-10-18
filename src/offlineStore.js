@@ -82,39 +82,27 @@ export async function queueMutation(userId, mutation) {
   }
 
   if (next.op === 'update') {
-    const create = same.find(item => item.op === 'create')
-    if (create) {
-      create.payload = next.payload
-      if ('programExclusions' in next) create.programExclusions = next.programExclusions
-      create.updatedAt = new Date().toISOString()
-      store.put(create)
-      for (const item of same) {
-        if (item.id !== create.id) store.delete(item.id)
-      }
-      await txDone(tx)
-      db.close()
-      return create
-    }
-
-    const earliestBase = same.find(item => item.baseUpdatedAt)?.baseUpdatedAt || next.baseUpdatedAt || null
-    for (const item of same) store.delete(item.id)
+    // Never mutate an enqueued create in-place. It may already be in flight,
+    // so keep the create and append a separate update with its own queue ID.
+    const previousUpdates = same.filter(item => item.op === 'update')
+    const earliestBase = previousUpdates.find(item => item.baseUpdatedAt)?.baseUpdatedAt
+      || next.baseUpdatedAt || null
+    for (const item of previousUpdates) store.delete(item.id)
     next.baseUpdatedAt = earliestBase
     store.put(next)
   } else if (next.op === 'delete') {
-    const create = same.find(item => item.op === 'create')
-    if (create) {
-      for (const item of same) store.delete(item.id)
-      await txDone(tx)
-      db.close()
-      return null
-    }
-
-    const earliestBase = same.find(item => item.baseUpdatedAt)?.baseUpdatedAt || next.baseUpdatedAt || null
-    for (const item of same) store.delete(item.id)
+    // An enqueued create might currently be uploading. Always retain the
+    // delete tombstone instead of canceling create and risking resurrection.
+    const previousUpdates = same.filter(item => item.op === 'update')
+    const oldDelete = same.find(item => item.op === 'delete')
+    const earliestBase = previousUpdates.find(item => item.baseUpdatedAt)?.baseUpdatedAt
+      || oldDelete?.baseUpdatedAt || next.baseUpdatedAt || null
+    for (const item of previousUpdates) store.delete(item.id)
+    for (const item of same.filter(item => item.op === 'delete')) store.delete(item.id)
     next.baseUpdatedAt = earliestBase
     store.put(next)
   } else {
-    for (const item of same) store.delete(item.id)
+    for (const item of same.filter(item => item.op === 'create')) store.delete(item.id)
     store.put(next)
   }
 
@@ -138,6 +126,15 @@ export async function removeMutation(id) {
   tx.objectStore(QUEUE).delete(id)
   await txDone(tx)
   db.close()
+}
+
+export async function getQueuedMutationById(id) {
+  const db = await openDb()
+  const tx = db.transaction(QUEUE, 'readonly')
+  const item = await requestResult(tx.objectStore(QUEUE).get(id))
+  await txDone(tx)
+  db.close()
+  return item || null
 }
 
 export async function countQueuedMutations(userId) {
