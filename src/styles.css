@@ -1291,3 +1291,27 @@ textarea{
   min-height:33px;
   touch-action:manipulation;
 }
+
+/* v0.4.9: posted-date clear belongs beside the label, not in the date field */
+.date-label-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:8px;
+  min-height:19px;
+}
+.sheet .posted-date-clear{
+  border:1px solid rgba(175,184,197,.18);
+  border-radius:8px;
+  padding:4px 9px;
+  margin:0;
+  color:#bec5ce;
+  background:#292e36;
+  font-size:11px;
+  line-height:1.45;
+  flex:0 0 auto;
+}
+.transaction-date-grid .custom-date-field{
+  width:100%;
+  min-width:0;
+}
