@@ -233,13 +233,17 @@ function App() {
 
       const firstError = cardsRes.error || programsRes.error || txRes.error || exclusionsRes.error
       if (firstError) throw firstError
-      const hasCycleFields = cardsRes.data?.length
+      let hasCycleFields = cardsRes.data?.length
         ? Object.prototype.hasOwnProperty.call(cardsRes.data[0], 'statement_close_day')
         : programsRes.data?.length
           ? Object.prototype.hasOwnProperty.call(programsRes.data[0], 'cap_period')
           : txRes.data?.length
             ? Object.prototype.hasOwnProperty.call(txRes.data[0], 'statement_period_override')
             : false
+      if (!cardsRes.data?.length && !programsRes.data?.length && !txRes.data?.length) {
+        const probe = await supabase.from('cards').select('statement_close_day').limit(1)
+        hasCycleFields = !probe.error
+      }
       setCycleSchemaReady(Boolean(hasCycleFields))
 
       const programsByCard = new Map()
@@ -328,6 +332,11 @@ function App() {
 
   const activeCards = cards.filter(c => !c.archived)
   const selectedCard = activeCards.find(c => c.id === selectedCardId) || null
+  useEffect(() => {
+    if (periodMode === 'statement' && !selectedCard?.statementCloseDay) {
+      setPeriodMode('month')
+    }
+  }, [periodMode, selectedCard?.statementCloseDay])
   const summary = useMemo(
     () => selectedCard
       ? (periodMode === 'month'
@@ -569,6 +578,9 @@ function App() {
   async function saveProgram(cardId, p) {
     const card = cards.find(c => c.id === cardId)
     if (!card) return
+    if (p.capPeriod === 'statement' && (!cycleSchemaReady || !card.statementCloseDay)) {
+      throw new Error('請先儲存卡片的每月結帳日，再設定帳單週期回饋。')
+    }
 
     const existing = p.id ? card.rewardPrograms.find(program => program.id === p.id) : null
     const id = p.id || crypto.randomUUID()
