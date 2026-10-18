@@ -38,12 +38,12 @@ async function getRemoteRow(entity, recordId) {
 }
 
 const TRACKED_FIELDS = {
-  transaction:['card_id','transaction_date','posted_date','title','amount','excluded','reconciled'],
-  card:['name','bank','last4','color_a','color_b','monthly_spend_limit','tip','reward_date_basis','sort_order'],
-  program:['card_id','name','rate','reward_cap','spend_cap','calc_mode','rounding','start_date','end_date'],
+  transaction:['card_id','transaction_date','posted_date','statement_period_override','title','amount','excluded','reconciled'],
+  card:['name','bank','last4','color_a','color_b','monthly_spend_limit','tip','reward_date_basis','statement_close_day','sort_order'],
+  program:['card_id','name','rate','reward_cap','spend_cap','calc_mode','rounding','cap_period','start_date','end_date'],
 }
 
-const NUMERIC_FIELDS = new Set(['amount','monthly_spend_limit','sort_order','rate','reward_cap','spend_cap'])
+const NUMERIC_FIELDS = new Set(['amount','monthly_spend_limit','statement_close_day','sort_order','rate','reward_cap','spend_cap'])
 
 function equalField(field, a, b) {
   if (a == null || a === '') return b == null || b === ''
