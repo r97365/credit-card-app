@@ -4,10 +4,10 @@ import { flushSync } from 'react-dom'
 import './styles.css'
 import { calculateCardSummary, calculateCardSummaryStatement, calculateCardSummaryRange, getStatementPeriodBounds, getStatementPeriodKey, isStatementPeriodEstimated, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
-import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations } from './offlineStore'
+import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations, removeMutation } from './offlineStore'
 import { flushMutationQueue, resolveConflict, inspectSyncConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.4.8'
+const APP_VERSION = '0.4.9'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
@@ -510,31 +510,51 @@ function App() {
   }
 
   async function deleteTransaction(txId) {
-    const tx = transactions.find(item => item.id === txId)
-    if (!tx) return false
+    const tx=transactions.find(item=>item.id===txId)
+    if (!tx || !session?.user) return false
+
+    // Make the deletion durable BEFORE hiding it. New cloud fetches merge away
+    // tombstoned rows even when the user immediately creates another charge.
+    const deadline=Date.now()+3500
+    const mutation=await queueMutation(session.user.id,{
+      entity:'transaction',recordId:txId,op:'delete',
+      baseUpdatedAt:tx.updatedAt || null,payload:null,notBefore:deadline,
+    })
+    if (!mutation) return false
+    setTransactions(prev=>prev.filter(item=>item.id!==txId))
+    await refreshSyncStatus()
+
+    // Each delete is independently queued. Replacing the undo prompt must
+    // never cancel the previous deletion.
     if (undoDelete?.timer) clearTimeout(undoDelete.timer)
-
-    setTransactions(prev => prev.filter(item => item.id !== txId))
-    const timer = setTimeout(async () => {
-      await queueLocalMutation({
-        entity:'transaction',
-        recordId:txId,
-        op:'delete',
-        baseUpdatedAt:tx.updatedAt || null,
-        payload:null,
-      })
-      setUndoDelete(null)
-    }, 3500)
-
-    setUndoDelete({ tx, timer })
+    const timer=window.setTimeout(()=>{
+      setUndoDelete(current=>current?.mutationId===mutation.id ? null : current)
+      if (navigator.onLine) {
+        flushMutationQueue(session.user.id).then(refreshSyncStatus).catch(e=>{
+          if (!networkError(e)) setError(e.message)
+        })
+      }
+    },Math.max(0,deadline-Date.now())+30)
+    setUndoDelete({tx,timer,mutationId:mutation.id})
     return true
   }
 
-  function undoTransactionDelete() {
-    if (!undoDelete) return
-    clearTimeout(undoDelete.timer)
-    setTransactions(prev => [undoDelete.tx, ...prev])
+  async function undoTransactionDelete() {
+    if (!undoDelete || !session?.user) return
+    const item=undoDelete
+    clearTimeout(item.timer)
     setUndoDelete(null)
+    try {
+      const queue=await getQueuedMutations(session.user.id)
+      const stillPending=queue.some(m=>m.id===item.mutationId && m.op==='delete')
+      if (!stillPending) {
+        setError('刪除已完成同步，無法直接復原。')
+        return
+      }
+      await removeMutation(item.mutationId)
+      setTransactions(prev=>prev.some(t=>t.id===item.tx.id)?prev:[item.tx,...prev])
+      await refreshSyncStatus()
+    } catch(e) { setError(e.message) }
   }
 
   async function saveCard(payload) {
@@ -1537,8 +1557,8 @@ function RangePicker({ startDate, endDate, onClose, onApply }) {
   </div>
 }
 
-function DateField({ value, onChange, placeholder = '選擇日期', allowClear = false }) {
-  return <div className={`custom-date-field ${value ? '' : 'empty'} ${allowClear ? 'clearable-date' : ''}`}>
+function DateField({ value, onChange, placeholder = '選擇日期' }) {
+  return <div className={`custom-date-field ${value ? '' : 'empty'}`}>
     <span>{value ? formatDateLong(value) : placeholder}</span>
     <span className="date-chevron">⌄</span>
     <input
@@ -1551,12 +1571,6 @@ function DateField({ value, onChange, placeholder = '選擇日期', allowClear =
       }}
       aria-label={placeholder}
     />
-    {allowClear && value && <button
-      type="button"
-      className="date-clear-btn"
-      aria-label="清除入帳日"
-      onClick={e => { e.preventDefault(); e.stopPropagation(); onChange('') }}
-    >清除</button>}
   </div>
 }
 
@@ -1603,7 +1617,7 @@ function TransactionEditor({ tx, cards, cycleSchemaReady, onClose, onSave }) {
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
     <SheetGrabber onClose={onClose} /><div className="sheet-title-row"><h3>編輯刷卡紀錄</h3><button className="close-btn" onClick={onClose}>×</button></div>
     <label>信用卡<select value={cardId} onChange={e=>{setCardId(e.target.value);setProgramExclusions([]);setStatementPeriodOverride('')}}>{cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-    <div className="transaction-date-grid"><label>交易日<DateField value={date} onChange={setDate} /></label><label>入帳日（選填）<DateField value={postedDate} onChange={setPostedDate} placeholder="未設定" allowClear /></label></div>
+    <div className="transaction-date-grid"><label>交易日<DateField value={date} onChange={setDate} /></label><label><span className="date-label-row"><span>入帳日（選填）</span>{postedDate && <button type="button" className="posted-date-clear" onClick={e=>{e.preventDefault();setPostedDate('')}}>清除</button>}</span><DateField value={postedDate} onChange={setPostedDate} placeholder="未設定" /></label></div>
     {cycleSchemaReady && selected?.statementCloseDay && <div className="cycle-assignment">
       <label>歸屬帳期
         <select value={statementPeriodOverride} onChange={e=>setStatementPeriodOverride(e.target.value)}>
