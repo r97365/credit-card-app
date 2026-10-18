@@ -7,7 +7,7 @@ import { supabase } from './supabase'
 import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations } from './offlineStore'
 import { flushMutationQueue, resolveConflict, inspectSyncConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.4.7'
+const APP_VERSION = '0.4.8'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
@@ -1227,6 +1227,7 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
   }, [selectedId])
   const dragRef = React.useRef(null)
   const timerRef = React.useRef(null)
+  const lastTouchAtRef = React.useRef(0)
 
   function unlockDragScroll(state = dragRef.current) {
     if (!state?.scrollLock) return
@@ -1278,26 +1279,43 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
   }
 
   function handleTouchStart(e, cardId, index) {
-    if (cards.length < 2) {
-      dragRef.current = { active:false, cardId, index, startY:e.touches[0].clientY }
+    lastTouchAtRef.current = Date.now()
+    clearTimeout(timerRef.current)
+    if (e.touches.length !== 1) {
+      dragRef.current = null
       return
     }
-
     const startY = e.touches[0].clientY
-    dragRef.current = { active:false, pending:true, cardId, index, startY, currentY:startY }
-    clearTimeout(timerRef.current)
-    timerRef.current = window.setTimeout(() => activateDrag(cardId, index, startY), 300)
+    dragRef.current = {
+      active:false, pending:cards.length >= 2, moved:false,
+      cardId, index, startY, currentY:startY,
+    }
+    if (cards.length >= 2) {
+      timerRef.current = window.setTimeout(() => {
+        const state = dragRef.current
+        if (state?.cardId === cardId && state.pending && !state.moved) {
+          activateDrag(cardId, index, startY)
+        }
+      }, 350)
+    }
   }
 
   function handleTouchMove(e, cardId) {
     const state = dragRef.current
     if (!state || state.cardId !== cardId) return
+    if (e.touches.length !== 1) {
+      clearTimeout(timerRef.current)
+      state.pending = false
+      state.moved = true
+      return
+    }
     const y = e.touches[0].clientY
 
     if (!state.active) {
-      if (Math.abs(y - state.startY) > 8) {
+      if (Math.abs(y - state.startY) > 7) {
         clearTimeout(timerRef.current)
         state.pending = false
+        state.moved = true
       }
       return
     }
@@ -1313,7 +1331,7 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
     setDrag(nextState)
   }
 
-  async function handleTouchEnd(cardId) {
+  async function handleTouchEnd(cardId, cancelled = false) {
     clearTimeout(timerRef.current)
     const state = dragRef.current
     if (!state || state.cardId !== cardId) return
@@ -1321,7 +1339,15 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
     if (!state.active) {
       dragRef.current = null
       setDrag(null)
-      onSelect(cardId)
+      // Scrolling is not a tap. It must never change selection or card order.
+      if (!cancelled && !state.moved) onSelect(cardId)
+      return
+    }
+
+    if (cancelled) {
+      unlockDragScroll(state)
+      dragRef.current = null
+      setDrag(null)
       return
     }
 
@@ -1354,7 +1380,11 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
     return index
   }
 
-  return <section className={`wallet-stack ${drag?.active ? 'reordering' : ''}`} aria-label="選擇信用卡">
+  return <section
+    className={`wallet-stack ${drag?.active ? 'reordering' : ''}`}
+    style={{ height:`calc(var(--wallet-card-height, 190px) + ${Math.max(0, ordered.length - 1) * 38 + 18}px)` }}
+    aria-label="選擇信用卡"
+  >
     {ordered.map((card, index) => {
       const dragging = drag?.active && drag.cardId === card.id
       const shownIndex = displayIndex(index)
@@ -1374,7 +1404,11 @@ function CardStack({ cards, selectedId, onSelect, onReorder }) {
         onTouchStart={e => handleTouchStart(e, card.id, index)}
         onTouchMove={e => handleTouchMove(e, card.id)}
         onTouchEnd={() => handleTouchEnd(card.id)}
-        onTouchCancel={() => handleTouchEnd(card.id)}
+        onTouchCancel={() => handleTouchEnd(card.id, true)}
+        onClick={() => {
+          // Mobile taps are handled on touchend; never replay a synthetic click.
+          if (Date.now() - lastTouchAtRef.current > 800 && !dragRef.current?.active) onSelect(card.id)
+        }}
         onContextMenu={e => e.preventDefault()}
       >
         <div className="card-top"><span>{card.bank || 'CARD'}</span><span>{card.last4 ? `•••• ${card.last4}` : ''}</span></div>
@@ -1503,16 +1537,26 @@ function RangePicker({ startDate, endDate, onClose, onApply }) {
   </div>
 }
 
-function DateField({ value, onChange, placeholder = '選擇日期' }) {
-  return <div className={`custom-date-field ${value ? '' : 'empty'}`}>
+function DateField({ value, onChange, placeholder = '選擇日期', allowClear = false }) {
+  return <div className={`custom-date-field ${value ? '' : 'empty'} ${allowClear ? 'clearable-date' : ''}`}>
     <span>{value ? formatDateLong(value) : placeholder}</span>
     <span className="date-chevron">⌄</span>
     <input
       type="date"
       value={value || ''}
-      onChange={e => onChange(e.target.value)}
+      onChange={e => onChange(e.target.value || '')}
+      onInput={e => {
+        // iOS native date picker Reset can fire input rather than change.
+        if (!e.currentTarget.value && value) onChange('')
+      }}
       aria-label={placeholder}
     />
+    {allowClear && value && <button
+      type="button"
+      className="date-clear-btn"
+      aria-label="清除入帳日"
+      onClick={e => { e.preventDefault(); e.stopPropagation(); onChange('') }}
+    >清除</button>}
   </div>
 }
 
@@ -1559,7 +1603,7 @@ function TransactionEditor({ tx, cards, cycleSchemaReady, onClose, onSave }) {
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="sheet sheet-tall" onMouseDown={e=>e.stopPropagation()}>
     <SheetGrabber onClose={onClose} /><div className="sheet-title-row"><h3>編輯刷卡紀錄</h3><button className="close-btn" onClick={onClose}>×</button></div>
     <label>信用卡<select value={cardId} onChange={e=>{setCardId(e.target.value);setProgramExclusions([]);setStatementPeriodOverride('')}}>{cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-    <div className="transaction-date-grid"><label>交易日<DateField value={date} onChange={setDate} /></label><label>入帳日（選填）<DateField value={postedDate} onChange={setPostedDate} placeholder="未設定" /></label></div>
+    <div className="transaction-date-grid"><label>交易日<DateField value={date} onChange={setDate} /></label><label>入帳日（選填）<DateField value={postedDate} onChange={setPostedDate} placeholder="未設定" allowClear /></label></div>
     {cycleSchemaReady && selected?.statementCloseDay && <div className="cycle-assignment">
       <label>歸屬帳期
         <select value={statementPeriodOverride} onChange={e=>setStatementPeriodOverride(e.target.value)}>
