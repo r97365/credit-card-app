@@ -205,6 +205,15 @@ function App() {
     }
   }
 
+  async function safeGetSnapshot(userId) {
+    try {
+      return await getSnapshot(userId)
+    } catch (err) {
+      setError('無法讀取離線資料庫：' + (err?.message || '請恢復網路後重新開啟 App'))
+      return null
+    }
+  }
+
   async function loadData(preferredSelectedId = null, options = {}) {
     if (!session?.user) return
     setLoadingData(true)
@@ -213,7 +222,7 @@ function App() {
 
     try {
       if (!navigator.onLine) {
-        const snapshot = await getSnapshot(session.user.id)
+        const snapshot = await safeGetSnapshot(session.user.id)
         if (snapshot) {
           const pending = await getQueuedMutations(session.user.id)
           const restoredCards = mergeCardsWithLocalPending(snapshot.cards || [], snapshot.cards || [], pending)
@@ -310,7 +319,7 @@ function App() {
       }))
 
       const queue = await getQueuedMutations(session.user.id)
-      const snapshot = await getSnapshot(session.user.id)
+      const snapshot = await safeGetSnapshot(session.user.id)
       if (queue.length && snapshot) {
         nextCards = mergeCardsWithLocalPending(nextCards, snapshot.cards || [], queue)
         nextTx = mergeTransactionsWithLocalPending(nextTx, snapshot.transactions || [], queue)
@@ -359,7 +368,7 @@ function App() {
     } catch (e) {
       if (networkError(e)) {
         setOnline(false)
-        const snapshot = await getSnapshot(session.user.id)
+        const snapshot = await safeGetSnapshot(session.user.id)
         if (snapshot) {
           const pending = await getQueuedMutations(session.user.id)
           const restoredCards = mergeCardsWithLocalPending(snapshot.cards || [], snapshot.cards || [], pending)
