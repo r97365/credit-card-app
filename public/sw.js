@@ -28,7 +28,7 @@ async function cacheBuildAssets(cache, html) {
   let match
   while ((match = pattern.exec(html))) {
     const absolute = new URL(match[1], APP_URL).href
-    if (sameAppUrl(absolute) && /\\.(?:js|css)(?:[?#]|$)/.test(absolute)) {
+    if (sameAppUrl(absolute) && /\.(?:js|css)(?:[?#]|$)/.test(absolute)) {
       requiredUrls.add(absolute)
     }
   }
