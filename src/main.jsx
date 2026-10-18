@@ -824,9 +824,9 @@ function App() {
                   <h2>{selectedCard.name}</h2>
                   <button className="tip-button" onClick={() => setShowTip(v => !v)} aria-label="顯示提示">ⓘ</button>
                 </div>
-                <div className="muted">{periodMode === 'month' ? '本月刷卡' : '區間刷卡'}</div>
+                <div className="muted">{periodMode === 'month' ? '本月刷卡' : periodMode === 'statement' ? '本期帳單' : '區間刷卡'}</div>
               </div>
-              <div className={`status-badge ${periodMode === 'month' && summary.limitRatio >= 1 ? 'danger' : periodMode === 'month' && summary.limitRatio >= .85 ? 'warn' : ''}`}>
+              <div className={`status-badge ${periodMode !== 'range' && summary.limitRatio >= 1 ? 'danger' : periodMode !== 'range' && summary.limitRatio >= .85 ? 'warn' : ''}`}>
                 {periodMode === 'range'
                   ? '自訂區間'
                   : selectedCard.monthlySpendLimit
@@ -845,8 +845,8 @@ function App() {
                   ? `/ ${formatMoney(selectedCard.monthlySpendLimit)}`
                   : '無刷卡上限'}</span>
             </div>
-            {periodMode === 'month' && <div className="progress"><div style={{ width: `${selectedCard.monthlySpendLimit ? Math.min(100, summary.limitRatio * 100) : 0}%` }} /></div>}
-            {periodMode === 'range' && <div className="range-note">跨月份時，各月份的回饋上限會分開計算後再加總。</div>}
+            {periodMode !== 'range' && <div className="progress"><div style={{ width: `${selectedCard.monthlySpendLimit ? Math.min(100, summary.limitRatio * 100) : 0}%` }} /></div>}
+            {periodMode === 'range' && <div className="range-note">回饋上限按照每個活動真正的日曆月或帳單週期計算；縮小查看區間不會重新獲得完整上限。</div>}
 
             <div className="reward-hero">
               <div><span>預估總回饋</span><strong>{formatMoney(summary.totalReward)}</strong></div>
