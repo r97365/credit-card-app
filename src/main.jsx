@@ -532,8 +532,7 @@ function App() {
       updatedAt,
     }
 
-    setTransactions(prev => [localTx, ...prev])
-    setShowAddTx(false)
+
 
     await queueLocalMutation({
       entity:'transaction',
@@ -553,6 +552,8 @@ function App() {
       },
       programExclusions:[],
     })
+    setTransactions(prev => [localTx, ...prev])
+    setShowAddTx(false)
   }
 
   async function toggleExcluded(txId) {
@@ -561,7 +562,7 @@ function App() {
     const nextValue = !tx.excluded
     const updatedAt = new Date().toISOString()
     const nextTx = { ...tx, excluded:nextValue, updatedAt }
-    setTransactions(prev => prev.map(item => item.id === txId ? nextTx : item))
+
 
     await queueLocalMutation({
       entity:'transaction',
@@ -571,6 +572,7 @@ function App() {
       payload:toTransactionRow(nextTx, session.user.id, cycleSchemaReady),
       programExclusions:nextTx.programExclusions || [],
     })
+    setTransactions(prev => prev.map(item => item.id === txId ? nextTx : item))
   }
 
   async function toggleReconciled(txId, forceValue) {
@@ -579,7 +581,7 @@ function App() {
     const nextValue = typeof forceValue === 'boolean' ? forceValue : !tx.reconciled
     const updatedAt = new Date().toISOString()
     const nextTx = { ...tx, reconciled:nextValue, updatedAt }
-    setTransactions(prev => prev.map(item => item.id === txId ? nextTx : item))
+
 
     await queueLocalMutation({
       entity:'transaction',
@@ -589,6 +591,7 @@ function App() {
       payload:toTransactionRow(nextTx, session.user.id, cycleSchemaReady),
       programExclusions:nextTx.programExclusions || [],
     })
+    setTransactions(prev => prev.map(item => item.id === txId ? nextTx : item))
     return true
   }
 
@@ -611,8 +614,7 @@ function App() {
       updatedAt,
     }
 
-    setTransactions(prev => prev.map(item => item.id === payload.id ? nextTx : item))
-    setEditingTransaction(null)
+
 
     await queueLocalMutation({
       entity:'transaction',
@@ -622,6 +624,8 @@ function App() {
       payload:toTransactionRow(nextTx, session.user.id, cycleSchemaReady),
       programExclusions:nextTx.programExclusions,
     })
+    setTransactions(prev => prev.map(item => item.id === payload.id ? nextTx : item))
+    setEditingTransaction(null)
   }
 
   async function deleteTransaction(txId) {
