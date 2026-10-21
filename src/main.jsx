@@ -5,10 +5,11 @@ import './styles.css'
 import { readLastSelectedCard, rememberLastSelectedCard, resolveSelectedCard, readCardView, rememberCardView, defaultCardView } from './cardPreference'
 import { calculateCardSummary, calculateCardSummaryStatement, calculateCardSummaryRange, getStatementPeriodBounds, getStatementPeriodKey, isStatementPeriodEstimated, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
-import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations, removeMutation } from './offlineStore'
+import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations, removeMutation, supportsStatementCycles } from './offlineStore'
+import { mergeCardsWithLocalPending, mergeTransactionsWithLocalPending } from './offlineMerge'
 import { flushMutationQueue, resolveConflict, inspectSyncConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.4.12'
+const APP_VERSION = '0.4.13'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
@@ -165,7 +166,7 @@ function App() {
     // Do not persist an incomplete startup view or a previous user's data.
     if (!session?.user || loadedUserId !== session.user.id || loadingData) return
     if (!cards.length && transactions.length) return
-    saveSnapshot(session.user.id, { cards, transactions })
+    saveSnapshot(session.user.id, { cards, transactions, cycleSchemaReady })
       .then(saved => { if (saved) setSnapshotSavedAt(new Date().toISOString()) })
       .catch(err => setError('本機離線資料儲存失敗：' + (err?.message || '未知錯誤')))
   }, [session?.user?.id, loadedUserId, loadingData, cards, transactions])
@@ -231,6 +232,7 @@ function App() {
           setTransactions(restoredTx)
           setLoadedUserId(session.user.id)
           setOfflineDataMissing(false)
+          setCycleSchemaReady(supportsStatementCycles(snapshot))
           setSnapshotSavedAt(snapshot.savedAt || null)
           setSelectedCardId(prev => resolveSelectedCard(restoredCards, {
             preferredId:preferredSelectedId,
@@ -356,7 +358,7 @@ function App() {
       setTransactions(nextTx)
       setLoadedUserId(session.user.id)
       setOfflineDataMissing(false)
-      const didSave=await saveSnapshot(session.user.id, { cards:nextCards, transactions:nextTx })
+      const didSave=await saveSnapshot(session.user.id, { cards:nextCards, transactions:nextTx, cycleSchemaReady:hasCycleFields })
       if (didSave) setSnapshotSavedAt(new Date().toISOString())
 
       setSelectedCardId(prev => resolveSelectedCard(nextCards, {
@@ -377,6 +379,7 @@ function App() {
           setTransactions(restoredTx)
           setLoadedUserId(session.user.id)
           setOfflineDataMissing(false)
+          setCycleSchemaReady(supportsStatementCycles(snapshot))
           setSnapshotSavedAt(snapshot.savedAt || null)
           setSelectedCardId(prev => resolveSelectedCard(restoredCards, {
             preferredId:preferredSelectedId,
@@ -403,7 +406,7 @@ function App() {
     if (!card) return
     const view = readCardView(session.user.id, id, {
       defaultMonth:localMonth(),
-      statementAllowed:Boolean(card.statementCloseDay && cycleSchemaReady),
+      statementAllowed:Boolean(card.statementCloseDay),
     })
     viewCardIdRef.current = id
     setMonth(view.month)
@@ -438,14 +441,14 @@ function App() {
     if (viewCardIdRef.current !== selectedCardId) {
       const view=readCardView(session.user.id, selectedCardId, {
         defaultMonth:localMonth(),
-        statementAllowed:Boolean(selectedCard.statementCloseDay && cycleSchemaReady),
+        statementAllowed:Boolean(selectedCard.statementCloseDay),
       })
       viewCardIdRef.current=selectedCardId
       setPeriodMode(view.mode)
       setMonth(view.month)
       setRangeStart(view.rangeStart)
       setRangeEnd(view.rangeEnd)
-    } else if (periodMode === 'statement' && !selectedCard.statementCloseDay && cycleSchemaReady) {
+    } else if (periodMode === 'statement' && !selectedCard.statementCloseDay) {
       changeView({mode:'month'})
     }
   }, [selectedCardId, session?.user?.id, selectedCard?.statementCloseDay, cycleSchemaReady])
@@ -923,7 +926,7 @@ function App() {
         <div className="period-modes">
           <button className={periodMode === 'month' ? 'selected' : ''} onClick={()=>changeView({mode:'month'})}>日曆月</button>
           <button
-            disabled={!selectedCard?.statementCloseDay || !cycleSchemaReady}
+            disabled={!selectedCard?.statementCloseDay || (!cycleSchemaReady && navigator.onLine)}
             className={periodMode === 'statement' ? 'selected' : ''}
             onClick={()=>changeView({mode:'statement'})}
           >帳單週期</button>
@@ -2370,50 +2373,6 @@ function toProgramRow(program, cardId, userId, cycleSchemaReady = false){
     end_date:program.endDate || null,
     updated_at:program.updatedAt || new Date().toISOString(),
   }
-}
-
-function mergeCardsWithLocalPending(remoteCards, localCards, queue){
-  const map = new Map(remoteCards.map(card => [card.id, card]))
-  const localMap = new Map(localCards.map(card => [card.id, card]))
-
-  for (const mutation of queue.filter(item => item.entity === 'card')) {
-    if (mutation.op === 'delete') map.delete(mutation.recordId)
-    else if (localMap.has(mutation.recordId)) map.set(mutation.recordId, localMap.get(mutation.recordId))
-  }
-
-  for (const mutation of queue.filter(item => item.entity === 'program')) {
-    for (const [cardId, card] of map.entries()) {
-      const localCard = localMap.get(cardId)
-      if (mutation.op === 'delete') {
-        map.set(cardId, { ...card, rewardPrograms:(card.rewardPrograms || []).filter(p => p.id !== mutation.recordId) })
-        continue
-      }
-
-      const localProgram = localCard?.rewardPrograms?.find(p => p.id === mutation.recordId)
-      if (!localProgram) continue
-      const current = card.rewardPrograms || []
-      map.set(cardId, {
-        ...card,
-        rewardPrograms:current.some(p => p.id === mutation.recordId)
-          ? current.map(p => p.id === mutation.recordId ? localProgram : p)
-          : [...current, localProgram],
-      })
-    }
-  }
-
-  return [...map.values()].sort((a,b) => (a.archived === b.archived ? a.sortOrder - b.sortOrder : a.archived ? 1 : -1))
-}
-
-function mergeTransactionsWithLocalPending(remoteTx, localTx, queue){
-  const map = new Map(remoteTx.map(tx => [tx.id, tx]))
-  const localMap = new Map(localTx.map(tx => [tx.id, tx]))
-
-  for (const mutation of queue.filter(item => item.entity === 'transaction')) {
-    if (mutation.op === 'delete') map.delete(mutation.recordId)
-    else if (localMap.has(mutation.recordId)) map.set(mutation.recordId, localMap.get(mutation.recordId))
-  }
-
-  return [...map.values()].sort((a,b) => b.date.localeCompare(a.date))
 }
 
 function syncEntityLabel(entity){
