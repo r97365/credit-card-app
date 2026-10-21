@@ -73,8 +73,23 @@ export function shouldReplaceSnapshot(previous, incoming) {
   return true
 }
 
-export async function saveSnapshot(userId, data) {
-  if (!userId) return false
+const snapshotWrites = new Map()
+
+export function saveSnapshot(userId, data) {
+  if (!userId) return Promise.resolve(false)
+  // UI and network refreshes can trigger writes concurrently. Always finish
+  // the older snapshot before persisting the newer view.
+  const previous = snapshotWrites.get(userId) || Promise.resolve()
+  const operation = previous.catch(() => {}).then(() => writeSnapshot(userId, data))
+  snapshotWrites.set(userId, operation)
+  operation.then(
+    () => { if (snapshotWrites.get(userId) === operation) snapshotWrites.delete(userId) },
+    () => { if (snapshotWrites.get(userId) === operation) snapshotWrites.delete(userId) }
+  )
+  return operation
+}
+
+async function writeSnapshot(userId, data) {
   const next = {
     userId,
     cards:data.cards,
@@ -135,6 +150,10 @@ export async function queueMutation(userId, mutation) {
     id: mutation.id || crypto.randomUUID(),
     userId,
     createdAt: mutation.createdAt || new Date().toISOString(),
+    sequence: mutation.sequence || Math.max(
+      Date.now() * 1000,
+      ...existing.map(item => Number(item.sequence || 0) + 1),
+    ),
   }
 
   // Every edit has a unique queue ID and a base version of the preceding
@@ -154,7 +173,12 @@ export async function getQueuedMutations(userId) {
   const rows = await requestResult(tx.objectStore(QUEUE).index('userId').getAll(userId))
   await txDone(tx)
   db.close()
-  return (rows || []).sort((a,b) => a.createdAt.localeCompare(b.createdAt))
+  return (rows || []).sort((a,b) =>
+    a.sequence && b.sequence
+      ? a.sequence - b.sequence
+      : (a.createdAt || '').localeCompare(b.createdAt || '') ||
+        (a.sequence ? 1 : -1)
+  )
 }
 
 export async function removeMutation(id) {
