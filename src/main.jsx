@@ -196,9 +196,14 @@ function App() {
   }
 
   async function queueLocalMutation(mutation) {
-    if (!session?.user) return
-    await queueMutation(session.user.id, mutation)
-    await refreshSyncStatus()
+    if (!session?.user) throw new Error('帳號尚未準備好，無法保存紀錄。')
+    try {
+      await queueMutation(session.user.id, mutation)
+    } catch (err) {
+      setError('本機儲存失敗，這次修改尚未保存：' + (err?.message || '請確認裝置儲存空間'))
+      throw err
+    }
+    await refreshSyncStatus().catch(() => {})
     if (navigator.onLine) {
       flushMutationQueue(session.user.id)
         .then(refreshSyncStatus)
