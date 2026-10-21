@@ -173,6 +173,7 @@ export function flushMutationQueue(userId) {
 
 async function performFlush(userId) {
   let synced=0, conflicts=0
+  const blockedRecords = new Set()
   // Keep draining: new changes may be queued while the network request is in flight.
   for (let pass=0; pass<10; pass++) {
     const queue=await getQueuedMutations(userId)
@@ -180,6 +181,9 @@ async function performFlush(userId) {
     for (const item of queue) {
       const mutation=await getQueuedMutationById(item.id)
       if (!mutation) continue
+      // Later edits to a conflicted row must not overwrite an unresolved edit.
+      const recordKey = mutation.entity + ':' + mutation.recordId
+      if (blockedRecords.has(recordKey)) continue
       if (mutation.op==='delete' && Number(mutation.notBefore || 0)>Date.now()) continue
       attempted++
       try {
@@ -193,6 +197,7 @@ async function performFlush(userId) {
             programExclusions:mutation.programExclusions,
           })
           conflicts++
+          blockedRecords.add(recordKey)
           continue
         }
         // An operation can be superseded by a newer mutation while awaiting Supabase.
