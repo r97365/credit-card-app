@@ -137,34 +137,33 @@ export async function getSnapshot(userId) {
 }
 
 export async function queueMutation(userId, mutation) {
-  const db = await openDb()
-  const tx = db.transaction(QUEUE, 'readwrite')
-  const store = tx.objectStore(QUEUE)
-  const existing = await requestResult(store.index('userId').getAll(userId))
-  const same = existing
-    .filter(item => item.entity === mutation.entity && item.recordId === mutation.recordId)
-    .sort((a,b) => a.createdAt.localeCompare(b.createdAt))
+  const rows = await queueMutations(userId,[mutation])
+  return rows[0]
+}
 
-  const next = {
-    ...mutation,
-    id: mutation.id || crypto.randomUUID(),
-    userId,
-    createdAt: mutation.createdAt || new Date().toISOString(),
-    sequence: mutation.sequence || Math.max(
-      Date.now() * 1000,
-      ...existing.map(item => Number(item.sequence || 0) + 1),
-    ),
+// A drag reorder or activity cycle duplication must either save every write
+// to the offline queue, or save none. Never leave half a card order queued.
+export async function queueMutations(userId, mutations) {
+  if (!userId || !Array.isArray(mutations) || !mutations.length) return []
+  const db=await openDb()
+  try {
+    const tx=db.transaction(QUEUE,'readwrite')
+    const store=tx.objectStore(QUEUE)
+    const existing=await requestResult(store.index('userId').getAll(userId))
+    let sequence=Math.max(Date.now()*1000,...existing.map(item=>Number(item.sequence || 0)+1))
+    const queued=mutations.map(mutation=>({
+      ...mutation,
+      id:mutation.id || crypto.randomUUID(),
+      userId,
+      createdAt:mutation.createdAt || new Date().toISOString(),
+      sequence:mutation.sequence || sequence++,
+    }))
+    for(const next of queued) store.put(next)
+    await txDone(tx)
+    return queued
+  } finally {
+    db.close()
   }
-
-  // Every edit has a unique queue ID and a base version of the preceding
-  // local edit. Coalescing/deleting an update while a request is in flight can
-  // produce false conflicts or silently discard the latest offline changes.
-  // Preserve create -> update(s) -> delete ordering for every record.
-  store.put(next)
-
-  await txDone(tx)
-  db.close()
-  return next
 }
 
 export async function getQueuedMutations(userId) {
