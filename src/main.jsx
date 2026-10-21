@@ -702,14 +702,7 @@ function App() {
       updatedAt,
     }
 
-    if (existing) {
-      setCards(prev => prev.map(card => card.id === id ? nextCard : card))
-    } else {
-      setCards(prev => [...prev.filter(card => card.archived === false), nextCard, ...prev.filter(card => card.archived)])
-      setSelectedCardId(id)
-      viewCardIdRef.current = null
-      rememberLastSelectedCard(session.user.id,id)
-    }
+
 
     await queueLocalMutation({
       entity:'card',
@@ -718,6 +711,14 @@ function App() {
       baseUpdatedAt:existing?.updatedAt || null,
       payload:toCardRow(nextCard, session.user.id, cycleSchemaReady),
     })
+    if (existing) {
+      setCards(prev => prev.map(card => card.id === id ? nextCard : card))
+    } else {
+      setCards(prev => [...prev.filter(card => card.archived === false), nextCard, ...prev.filter(card => card.archived)])
+      setSelectedCardId(id)
+      viewCardIdRef.current = null
+      rememberLastSelectedCard(session.user.id,id)
+    }
   }
 
   async function saveProgram(cardId, p) {
@@ -744,12 +745,7 @@ function App() {
       updatedAt,
     }
 
-    setCards(prev => prev.map(item => item.id !== cardId ? item : {
-      ...item,
-      rewardPrograms:existing
-        ? item.rewardPrograms.map(program => program.id === id ? nextProgram : program)
-        : [...item.rewardPrograms, nextProgram],
-    }))
+
 
     await queueLocalMutation({
       entity:'program',
@@ -758,6 +754,12 @@ function App() {
       baseUpdatedAt:existing?.updatedAt || null,
       payload:toProgramRow(nextProgram, cardId, session.user.id, cycleSchemaReady),
     })
+    setCards(prev => prev.map(item => item.id !== cardId ? item : {
+      ...item,
+      rewardPrograms:existing
+        ? item.rewardPrograms.map(program => program.id === id ? nextProgram : program)
+        : [...item.rewardPrograms, nextProgram],
+    }))
   }
 
   async function deleteProgram(id) {
@@ -765,10 +767,7 @@ function App() {
     const program = card?.rewardPrograms.find(p => p.id === id)
     if (!card || !program) return
 
-    setCards(prev => prev.map(item => item.id !== card.id ? item : {
-      ...item,
-      rewardPrograms:item.rewardPrograms.filter(p => p.id !== id),
-    }))
+
 
     await queueLocalMutation({
       entity:'program',
@@ -777,6 +776,10 @@ function App() {
       baseUpdatedAt:program.updatedAt || null,
       payload:null,
     })
+    setCards(prev => prev.map(item => item.id !== card.id ? item : {
+      ...item,
+      rewardPrograms:item.rewardPrograms.filter(p => p.id !== id),
+    }))
   }
 
   async function reorderCards(orderedIds) {
