@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  saveSnapshot,getSnapshot,queueMutation,getQueuedMutations,removeMutation,
+  saveSnapshot,getSnapshot,queueMutation,queueMutations,getQueuedMutations,removeMutation,
   isUsableSnapshot,supportsStatementCycles,
 } from './offlineStore.js'
 import { mergeCardsWithLocalPending,mergeTransactionsWithLocalPending } from './offlineMerge.js'
@@ -75,4 +75,36 @@ test('applying an offline card edit from pending queue preserves statement view'
   assert.equal(updated[0].statementCloseDay,10)
   assert.equal(updated[0].name,'Sport updated')
   await removeMutation(edit.id)
+})
+
+test('batch card reorder is persisted atomically and keeps the intended order',async()=>{
+  const u='batch-reorder-offline'
+  const payload=id=>({
+    id,name:id,bank:'',sort_order:id==='A'?1:0,
+    statement_close_day:10,updated_at:'2026-10-21T10:00:00.000Z'
+  })
+  const writes=await queueMutations(u,[
+    {entity:'card',recordId:'A',op:'update',payload:payload('A')},
+    {entity:'card',recordId:'B',op:'update',payload:payload('B')},
+  ])
+  assert.equal(writes.length,2)
+  const ordered=await getQueuedMutations(u)
+  assert.deepEqual(ordered.map(x=>x.recordId),['A','B'])
+  assert.ok(ordered[0].sequence < ordered[1].sequence)
+  for(const m of writes)await removeMutation(m.id)
+})
+
+test('rapid queued edits with identical wall-clock timestamps preserve their queue order',async()=>{
+  const u='fast-queued-updates'
+  const time='2026-10-21T10:00:00.000Z'
+  const items=await queueMutations(u,[
+    {entity:'transaction',op:'create',recordId:'new',
+      createdAt:time,payload:{id:'new',amount:100,title:'First'}},
+    {entity:'transaction',op:'update',recordId:'new',
+      createdAt:time,payload:{id:'new',amount:200,title:'Second'}},
+    {entity:'transaction',op:'delete',recordId:'new',
+      createdAt:time,payload:null},
+  ])
+  assert.deepEqual((await getQueuedMutations(u)).map(x=>x.op),['create','update','delete'])
+  for(const m of items)await removeMutation(m.id)
 })
