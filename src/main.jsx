@@ -5,7 +5,7 @@ import './styles.css'
 import { readLastSelectedCard, rememberLastSelectedCard, resolveSelectedCard, readCardView, rememberCardView, defaultCardView } from './cardPreference'
 import { calculateCardSummary, calculateCardSummaryStatement, calculateCardSummaryRange, getStatementPeriodBounds, getStatementPeriodKey, isStatementPeriodEstimated, formatMoney, formatPct } from './rewardEngine'
 import { supabase } from './supabase'
-import { saveSnapshot, getSnapshot, queueMutation, countQueuedMutations, getQueuedMutations, removeMutation, supportsStatementCycles } from './offlineStore'
+import { saveSnapshot, getSnapshot, queueMutation, queueMutations, countQueuedMutations, getQueuedMutations, removeMutation, supportsStatementCycles } from './offlineStore'
 import { mergeCardsWithLocalPending, mergeTransactionsWithLocalPending } from './offlineMerge'
 import { flushMutationQueue, resolveConflict, inspectSyncConflict, loadConflicts, networkError } from './syncEngine'
 
@@ -789,23 +789,27 @@ function App() {
   }
 
   async function reorderCards(orderedIds) {
-    const active = orderedIds.map(id => cards.find(c => c.id === id)).filter(Boolean)
-    const updatedAt = new Date().toISOString()
-    const nextActive = active.map((card,index) => ({ ...card, sortOrder:index, updatedAt }))
-    const archived = cards.filter(c => c.archived)
-    setCards([...nextActive, ...archived])
-
-    for (const card of nextActive) {
-      await queueMutation(session.user.id, {
+    const active=orderedIds.map(id=>cards.find(c=>c.id===id)).filter(Boolean)
+    const updatedAt=new Date().toISOString()
+    const nextActive=active.map((card,index)=>({...card,sortOrder:index,updatedAt}))
+    const archived=cards.filter(card=>card.archived)
+    try {
+      await queueMutations(session.user.id,nextActive.map(card=>({
         entity:'card',
         recordId:card.id,
         op:'update',
-        baseUpdatedAt:active.find(x => x.id === card.id)?.updatedAt || null,
-        payload:toCardRow(card, session.user.id, cycleSchemaReady),
+        baseUpdatedAt:active.find(item=>item.id===card.id)?.updatedAt || null,
+        payload:toCardRow(card,session.user.id,cycleSchemaReady),
+      })))
+      setCards([...nextActive,...archived])
+      await refreshSyncStatus()
+      if(navigator.onLine) flushMutationQueue(session.user.id).then(refreshSyncStatus).catch(err=>{
+        if (!networkError(err)) setError(err.message)
       })
+    } catch (err) {
+      setError('卡片排序尚未儲存：' + (err?.message || '請重試'))
+      throw err
     }
-    await refreshSyncStatus()
-    if (navigator.onLine) flushMutationQueue(session.user.id).then(refreshSyncStatus).catch(() => {})
   }
 
   async function archiveCard(cardId) {
@@ -865,21 +869,19 @@ function App() {
       }
     })
 
-    setCards(prev => prev.map(item => item.id !== cardId ? item : {
-      ...item,
-      rewardPrograms:[...item.rewardPrograms, ...copies],
+    await queueMutations(session.user.id,copies.map(program=>({
+      entity:'program',
+      recordId:program.id,
+      op:'create',
+      payload:toProgramRow(program,cardId,session.user.id,cycleSchemaReady),
+    })))
+    setCards(prev=>prev.map(item=>item.id!==cardId ? item : {
+      ...item,rewardPrograms:[...item.rewardPrograms,...copies],
     }))
-
-    for (const program of copies) {
-      await queueMutation(session.user.id, {
-        entity:'program',
-        recordId:program.id,
-        op:'create',
-        payload:toProgramRow(program, cardId, session.user.id, cycleSchemaReady),
-      })
-    }
     await refreshSyncStatus()
-    if (navigator.onLine) flushMutationQueue(session.user.id).then(refreshSyncStatus).catch(() => {})
+    if (navigator.onLine) flushMutationQueue(session.user.id).then(refreshSyncStatus).catch(err=>{
+      if (!networkError(err)) setError(err.message)
+    })
     return copies.length
   }
 
