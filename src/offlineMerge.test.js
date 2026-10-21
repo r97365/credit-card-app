@@ -76,11 +76,13 @@ test('queued new card and new reward program survive app restart',()=>{
   assert.equal(out[0].rewardPrograms[0].capPeriod,'statement')
 })
 
-test('program delete does not affect other programs or cards',()=>{
-  const out=mergeCardsWithLocalPending([card(),card('second')],[card(),card('second')],[
+test('program delete only affects its owning card',()=>{
+  const second={...card('second'),rewardPrograms:[{id:'other',name:'Other',rate:2}]}
+  const out=mergeCardsWithLocalPending([card(),second],[card(),second],[
     {entity:'program',op:'delete',recordId:'old'}
   ])
-  assert.deepEqual(out.map(x=>x.rewardPrograms.length),[0,0])
+  assert.equal(out.find(card=>card.id==='card').rewardPrograms.length,0)
+  assert.equal(out.find(card=>card.id==='second').rewardPrograms[0].name,'Other')
 })
 
 test('queued programs retain their period setting over a stale remote version',()=>{
