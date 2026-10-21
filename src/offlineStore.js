@@ -137,30 +137,11 @@ export async function queueMutation(userId, mutation) {
     createdAt: mutation.createdAt || new Date().toISOString(),
   }
 
-  if (next.op === 'update') {
-    // Never mutate an enqueued create in-place. It may already be in flight,
-    // so keep the create and append a separate update with its own queue ID.
-    const previousUpdates = same.filter(item => item.op === 'update')
-    const earliestBase = previousUpdates.find(item => item.baseUpdatedAt)?.baseUpdatedAt
-      || next.baseUpdatedAt || null
-    for (const item of previousUpdates) store.delete(item.id)
-    next.baseUpdatedAt = earliestBase
-    store.put(next)
-  } else if (next.op === 'delete') {
-    // An enqueued create might currently be uploading. Always retain the
-    // delete tombstone instead of canceling create and risking resurrection.
-    const previousUpdates = same.filter(item => item.op === 'update')
-    const oldDelete = same.find(item => item.op === 'delete')
-    const earliestBase = previousUpdates.find(item => item.baseUpdatedAt)?.baseUpdatedAt
-      || oldDelete?.baseUpdatedAt || next.baseUpdatedAt || null
-    for (const item of previousUpdates) store.delete(item.id)
-    for (const item of same.filter(item => item.op === 'delete')) store.delete(item.id)
-    next.baseUpdatedAt = earliestBase
-    store.put(next)
-  } else {
-    for (const item of same.filter(item => item.op === 'create')) store.delete(item.id)
-    store.put(next)
-  }
+  // Every edit has a unique queue ID and a base version of the preceding
+  // local edit. Coalescing/deleting an update while a request is in flight can
+  // produce false conflicts or silently discard the latest offline changes.
+  // Preserve create -> update(s) -> delete ordering for every record.
+  store.put(next)
 
   await txDone(tx)
   db.close()
