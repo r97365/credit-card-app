@@ -341,6 +341,7 @@ function App() {
         setTransactions(recoveredTx)
         setLoadedUserId(session.user.id)
         setOfflineDataMissing(false)
+        setCycleSchemaReady(supportsStatementCycles(snapshot))
         setSelectedCardId(prev => resolveSelectedCard(recoveredCards, {
           preferredId:preferredSelectedId,
           savedId:readLastSelectedCard(session.user.id),
