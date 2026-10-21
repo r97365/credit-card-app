@@ -55,6 +55,16 @@ export function isUsableSnapshot(snapshot) {
     (snapshot.cards.length > 0 || snapshot.transactions.length === 0)
 }
 
+export function supportsStatementCycles(snapshot) {
+  if (!snapshot) return false
+  if (snapshot.schemaVersion >= 2 || snapshot.cycleSchemaReady === true) return true
+  return Array.isArray(snapshot.cards) && snapshot.cards.some(card =>
+    Number.isInteger(Number(card?.statementCloseDay)) &&
+      Number(card.statementCloseDay) >= 1 &&
+      Number(card.statementCloseDay) <= 31
+  )
+}
+
 export function shouldReplaceSnapshot(previous, incoming) {
   if (!isUsableSnapshot(incoming)) return false
   // Archiving cards retains them in the card array. There is currently no
@@ -69,6 +79,7 @@ export async function saveSnapshot(userId, data) {
     userId,
     cards:data.cards,
     transactions:data.transactions,
+    schemaVersion:data.schemaVersion || (data.cycleSchemaReady ? 2 : 1),
     savedAt:new Date().toISOString(),
   }
   if (!isUsableSnapshot(next)) return false
