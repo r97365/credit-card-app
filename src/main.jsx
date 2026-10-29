@@ -35,6 +35,7 @@ function App() {
   const [session, setSession] = useState(undefined)
   const [cards, setCards] = useState([])
   const [transactions, setTransactions] = useState([])
+  const [saveNotice, setSaveNotice] = useState(null)
   const [selectedCardId, setSelectedCardId] = useState(null)
   const restoredUserRef = React.useRef(null)
   const [month, setMonth] = useState(localMonth())
@@ -561,6 +562,13 @@ function App() {
     })
     setTransactions(prev => [localTx, ...prev])
     setShowAddTx(false)
+    const inCurrentView = transactionIsInView(localTx, selectedCard, {
+      mode:periodMode, month, rangeStart, rangeEnd,
+    })
+    setSaveNotice(inCurrentView ? null : {
+      title:localTx.title,
+      month:localTx.date.slice(0,7),
+    })
   }
 
   async function toggleExcluded(txId) {
@@ -929,6 +937,14 @@ function App() {
       </header>
 
       {error && <div className="error-banner">{error}<button onClick={() => setError('')}>×</button></div>}
+      {saveNotice && <div className="save-notice">
+        <span>「{saveNotice.title}」已儲存，交易日期不在目前查看的區間。</span>
+        <button onClick={()=>{
+          changeView({mode:'month',month:saveNotice.month})
+          setSaveNotice(null)
+        }}>查看 {saveNotice.month.replace('-',' / ')}</button>
+        <button aria-label="關閉提示" onClick={()=>setSaveNotice(null)}>×</button>
+      </div>}
       {(!online || pendingSync > 0 || syncConflicts.length > 0 || syncBusy) && <button className={`sync-banner ${!online ? 'offline' : syncConflicts.length ? 'conflict' : ''}`} onClick={() => setShowSyncSheet(true)}>
         <span className="sync-dot" />
         <div>
