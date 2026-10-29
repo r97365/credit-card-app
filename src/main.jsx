@@ -389,29 +389,33 @@ function App() {
     } catch (e) {
       if (recoverableNetworkFailure(e, navigator.onLine)) {
         setOnline(false)
-        const snapshot = await safeGetSnapshot(session.user.id)
-        if (snapshot) {
-          const pending = await getQueuedMutations(session.user.id)
-          const restoredCards = mergeCardsWithLocalPending(snapshot.cards || [], snapshot.cards || [], pending)
-          const restoredTx = mergeTransactionsWithLocalPending(snapshot.transactions || [], snapshot.transactions || [], pending)
-          setCards(restoredCards)
-          setTransactions(restoredTx)
-          setLoadedUserId(session.user.id)
-          setOfflineDataMissing(false)
-          setCycleSchemaReady(supportsStatementCycles(snapshot))
-          setSnapshotSavedAt(snapshot.savedAt || null)
-          setSelectedCardId(prev => resolveSelectedCard(restoredCards, {
-            preferredId:preferredSelectedId,
-            savedId:readLastSelectedCard(session.user.id),
-            currentId:prev,
-          }))
-        } else {
-          setLoadedUserId(null)
+        try {
+          const snapshot = await withDeadline(safeGetSnapshot(session.user.id),3500,'離線快照恢復')
+          if (snapshot) {
+            const pending = await withDeadline(getQueuedMutations(session.user.id),3000,'離線操作佇列')
+            const restoredCards = mergeCardsWithLocalPending(snapshot.cards || [],snapshot.cards || [],pending)
+            const restoredTx = mergeTransactionsWithLocalPending(snapshot.transactions || [],snapshot.transactions || [],pending)
+            setCards(restoredCards)
+            setTransactions(restoredTx)
+            setLoadedUserId(session.user.id)
+            setOfflineDataMissing(false)
+            setCycleSchemaReady(supportsStatementCycles(snapshot))
+            setSnapshotSavedAt(snapshot.savedAt || null)
+            setSelectedCardId(prev => resolveSelectedCard(restoredCards, {
+              preferredId:preferredSelectedId,
+              savedId:readLastSelectedCard(session.user.id),
+              currentId:prev,
+            }))
+          } else {
+            setOfflineDataMissing(true)
+            setError('無法找到本機離線快取；請恢復網路重新載入。')
+          }
+        } catch (localError) {
           setOfflineDataMissing(true)
-          setError('網路連線失敗，且沒有可用的離線卡片資料；請恢復網路重新載入。')
+          setError('離線資料恢復未完成：' + localError.message + ' 請勿清除網站資料。')
         }
       } else {
-        setError(e.message)
+        setError(e?.message || '載入失敗，請重試。')
       }
     } finally {
       if (generation === loadGenerationRef.current) setLoadingData(false)
