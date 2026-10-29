@@ -8,9 +8,10 @@ import { supabase } from './supabase'
 import { saveSnapshot, getSnapshot, queueMutation, queueMutations, countQueuedMutations, getQueuedMutations, removeMutation, supportsStatementCycles } from './offlineStore'
 import { mergeCardsWithLocalPending, mergeTransactionsWithLocalPending } from './offlineMerge'
 import { transactionsInView, transactionIsInView } from './transactionView'
+import { withDeadline, recoverableNetworkFailure } from './bootSafety'
 import { flushMutationQueue, resolveConflict, inspectSyncConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.4.14'
+const APP_VERSION = '0.4.15'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
@@ -55,6 +56,7 @@ function App() {
   const [editingTransaction, setEditingTransaction] = useState(null)
   const [undoDelete, setUndoDelete] = useState(null)
   const [loadingData, setLoadingData] = useState(false)
+  const loadGenerationRef = React.useRef(0)
   const [loadedUserId, setLoadedUserId] = useState(null)
   const [offlineDataMissing, setOfflineDataMissing] = useState(false)
   const [cycleSchemaReady, setCycleSchemaReady] = useState(false)
@@ -143,7 +145,14 @@ function App() {
       setError('Supabase 尚未完成設定。')
       return
     }
-    supabase.auth.getSession().then(({ data }) => setSession(data.session))
+    withDeadline(supabase.auth.getSession(), 3500, '讀取登入狀態')
+      .then(({ data }) => setSession(data.session))
+      .catch(() => {
+        // Do not hang authentication indefinitely; a previously cached session
+        // can still be retrieved when connectivity returns.
+        setSession(current => current === undefined ? null : current)
+        setError('登入狀態暫時無法讀取。請恢復網路重新開啟，勿清除離線資料。')
+      })
     const { data: sub } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
     return () => sub.subscription.unsubscribe()
   }, [])
@@ -224,15 +233,16 @@ function App() {
 
   async function loadData(preferredSelectedId = null, options = {}) {
     if (!session?.user) return
+    const generation = ++loadGenerationRef.current
     setLoadingData(true)
     setError('')
     setOfflineDataMissing(false)
 
     try {
       if (!navigator.onLine) {
-        const snapshot = await safeGetSnapshot(session.user.id)
+        const snapshot = await withDeadline(safeGetSnapshot(session.user.id), 3500, '讀取離線快照')
         if (snapshot) {
-          const pending = await getQueuedMutations(session.user.id)
+          const pending = await withDeadline(getQueuedMutations(session.user.id), 3500, '讀取離線待同步資料')
           const restoredCards = mergeCardsWithLocalPending(snapshot.cards || [], snapshot.cards || [], pending)
           const restoredTx = mergeTransactionsWithLocalPending(snapshot.transactions || [], snapshot.transactions || [], pending)
           setCards(restoredCards)
@@ -251,22 +261,22 @@ function App() {
           setOfflineDataMissing(true)
           setError('目前沒有可用的離線卡片快取。請恢復網路開啟一次，完成資料載入後再測試離線模式。')
         }
-        await refreshSyncStatus()
+        await withDeadline(refreshSyncStatus(), 2500, '讀取同步狀態').catch(()=>{})
         return
       }
 
       if (!options.skipFlush) {
-        try { await flushMutationQueue(session.user.id) } catch (e) {
+        try { await withDeadline(flushMutationQueue(session.user.id), 4500, '雲端同步') } catch (e) {
           if (!networkError(e)) throw e
         }
       }
 
-      const [cardsRes, programsRes, txRes, exclusionsRes] = await Promise.all([
+      const [cardsRes, programsRes, txRes, exclusionsRes] = await withDeadline(Promise.all([
         supabase.from('cards').select('*').order('sort_order').order('created_at'),
         supabase.from('reward_programs').select('*').order('created_at'),
         supabase.from('transactions').select('*').order('transaction_date', { ascending: false }),
         supabase.from('transaction_reward_exclusions').select('*'),
-      ])
+      ]), 6500, '雲端讀取')
 
       const firstError = cardsRes.error || programsRes.error || txRes.error || exclusionsRes.error
       if (firstError) throw firstError
@@ -377,7 +387,7 @@ function App() {
       }))
       await refreshSyncStatus()
     } catch (e) {
-      if (networkError(e)) {
+      if (recoverableNetworkFailure(e, navigator.onLine)) {
         setOnline(false)
         const snapshot = await safeGetSnapshot(session.user.id)
         if (snapshot) {
@@ -404,7 +414,7 @@ function App() {
         setError(e.message)
       }
     } finally {
-      setLoadingData(false)
+      if (generation === loadGenerationRef.current) setLoadingData(false)
     }
   }
 
