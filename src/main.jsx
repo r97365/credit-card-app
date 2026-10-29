@@ -7,9 +7,10 @@ import { calculateCardSummary, calculateCardSummaryStatement, calculateCardSumma
 import { supabase } from './supabase'
 import { saveSnapshot, getSnapshot, queueMutation, queueMutations, countQueuedMutations, getQueuedMutations, removeMutation, supportsStatementCycles } from './offlineStore'
 import { mergeCardsWithLocalPending, mergeTransactionsWithLocalPending } from './offlineMerge'
+import { transactionsInView, transactionIsInView } from './transactionView'
 import { flushMutationQueue, resolveConflict, inspectSyncConflict, loadConflicts, networkError } from './syncEngine'
 
-const APP_VERSION = '0.4.13'
+const APP_VERSION = '0.4.14'
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || APP_VERSION
 
 const LEGACY_PALETTES = [
@@ -309,6 +310,7 @@ function App() {
         sortOrder: Number(row.sort_order || 0),
         archived: Number(row.sort_order || 0) < 0,
         updatedAt: row.updated_at,
+        createdAt: row.created_at || row.updated_at,
       })).sort((a,b) => (a.archived === b.archived ? a.sortOrder - b.sortOrder : a.archived ? 1 : -1))
 
       let nextTx = (txRes.data || []).map(row => ({
@@ -469,14 +471,12 @@ function App() {
     [selectedCard, transactions, month, periodMode, rangeStart, rangeEnd]
   )
 
-  const visibleTransactions = useMemo(() => transactions.filter(t =>
-    t.cardId === selectedCardId &&
-    (periodMode === 'month'
-      ? t.date.startsWith(month)
-      : periodMode === 'statement'
-        ? getStatementPeriodKey(selectedCard, t) === month
-        : t.date >= rangeStart && t.date <= rangeEnd)
-  ), [transactions, selectedCardId, selectedCard, periodMode, month, rangeStart, rangeEnd])
+  const visibleTransactions = useMemo(
+    () => transactionsInView(transactions, selectedCard, {
+      mode:periodMode, month, rangeStart, rangeEnd,
+    }),
+    [transactions, selectedCard, periodMode, month, rangeStart, rangeEnd]
+  )
 
   const expiringPrograms = useMemo(() => {
     const today = localToday()
@@ -536,6 +536,7 @@ function App() {
       reconciled:false,
       programExclusions:[],
       updatedAt,
+      createdAt:updatedAt,
     }
 
 
@@ -1042,7 +1043,7 @@ function App() {
               <span className="record-count">{visibleTransactions.length} 筆</span>
             </div>
             <div className="transaction-list">
-              {visibleTransactions.slice(0,8).map(tx => (
+              {visibleTransactions.map(tx => (
                 <SwipeTransaction
                   key={tx.id}
                   tx={tx}
