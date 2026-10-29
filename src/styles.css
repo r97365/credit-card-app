@@ -1315,3 +1315,29 @@ textarea{
   width:100%;
   min-width:0;
 }
+
+/* v0.4.14: explain valid transactions outside the current card's chosen period */
+.save-notice{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  padding:10px 12px;
+  margin:8px 0 14px;
+  background:rgba(165,193,167,.09);
+  border:1px solid rgba(165,193,167,.28);
+  border-radius:13px;
+  color:#d4e0d7;
+  font-size:12px;
+  line-height:1.45;
+}
+.save-notice span{flex:1;min-width:0}
+.save-notice button{
+  flex-shrink:0;
+  border:0;
+  color:#e7d4a5;
+  background:none;
+  font-weight:650;
+  padding:6px 4px;
+  font-size:12px;
+}
+.save-notice button:last-child{color:#949ca5;font-size:19px}
